@@ -1,0 +1,17 @@
+{
+  "scripts": {
+    "start": "vite --host 0.0.0.0",
+    "server": "node server.js",
+    "build": "vite build"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "latest",
+    "vite": "latest",
+    "react": "latest",
+    "react-dom": "latest",
+    "express": "latest",
+    "axios": "latest",
+    "cors": "latest"
+  },
+  "devDependencies": {}
+}
