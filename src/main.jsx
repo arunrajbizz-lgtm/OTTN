@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef, useCallback } from "react";
 import ReactDOM from "react-dom/client";
 import "./style.css";
 
@@ -25,12 +25,43 @@ function App() {
   const [status, setStatus] = useState("Loading...");
   const [playUrl, setPlayUrl] = useState("");
 
+  // Focus Management State
+  const [navZone, setNavZone] = useState("menu");
+  const [focusIndex, setFocusIndex] = useState(0);
+  const lastFocusMemory = useRef({});
+
+  const getFocusKey = useCallback(() => {
+    const catId = selectedCat ? idOf(selectedCat) : "none";
+    return `${section}|${navZone}|${catId}`;
+  }, [section, navZone, selectedCat]);
+
+  const rememberFocus = useCallback(() => {
+    const key = getFocusKey();
+    lastFocusMemory.current[key] = focusIndex;
+  }, [getFocusKey, focusIndex]);
+
+  const restoreFocus = useCallback((zone, sec, cat) => {
+    const catId = cat ? idOf(cat) : "none";
+    const key = `${sec}|${zone}|${catId}`;
+    const remembered = lastFocusMemory.current[key];
+    if (remembered !== undefined) {
+      setFocusIndex(remembered);
+    } else {
+      setFocusIndex(0);
+    }
+  }, []);
+
   async function api(path) {
-    const r = await fetch(BACKEND + path);
-    return await r.json();
+    try {
+      const r = await fetch(BACKEND + path);
+      return await r.json();
+    } catch (e) {
+      return { ok: false, error: e.message };
+    }
   }
 
-  async function loadSection(sec) {
+  const loadSection = useCallback(async (sec) => {
+    rememberFocus();
     setSection(sec);
     setCategories([]);
     setItems([]);
@@ -38,6 +69,14 @@ function App() {
     setSelectedItem(null);
     setPlayUrl("");
     setStatus("Loading...");
+    
+    // Restore focus for the new section's menu position if we were in menu
+    if (navZone === "menu") {
+      setFocusIndex(MENU.indexOf(sec));
+    } else {
+      setNavZone("menu");
+      setFocusIndex(MENU.indexOf(sec));
+    }
 
     if (sec === "Settings") {
       setStatus("Backend: " + BACKEND);
@@ -49,19 +88,15 @@ function App() {
     if (sec === "Media library") path = "/api/media-library";
     if (sec === "Radio stations") path = "/api/radio";
 
-    try {
-      const j = await api(path);
-      console.log("SECTION", sec, j);
-      if (!j.ok) return setStatus("Failed: " + j.error);
-      const arr = j.data || [];
-      setCategories(arr);
-      setStatus("Loaded " + arr.length);
-    } catch (e) {
-      setStatus("Failed: " + e.message);
-    }
-  }
+    const j = await api(path);
+    if (!j.ok) return setStatus("Failed: " + j.error);
+    const arr = j.data || [];
+    setCategories(arr);
+    setStatus("Loaded " + arr.length);
+  }, [navZone, rememberFocus]);
 
-  async function loadItems(cat) {
+  const loadItems = useCallback(async (cat) => {
+    rememberFocus();
     setSelectedCat(cat);
     setItems([]);
     setSelectedItem(null);
@@ -74,19 +109,18 @@ function App() {
     if (section === "Media library") path = `/api/vod-list?category=${encodeURIComponent(id)}`;
     if (section === "Radio stations") path = `/api/radio-list?genre=${encodeURIComponent(id)}`;
 
-    try {
-      const j = await api(path);
-      console.log("ITEMS", section, j);
-      if (!j.ok) return setStatus("Failed: " + j.error);
-      const arr = j.data || [];
-      setItems(arr);
-      setStatus("Loaded " + arr.length);
-    } catch (e) {
-      setStatus("Failed: " + e.message);
-    }
-  }
+    const j = await api(path);
+    if (!j.ok) return setStatus("Failed: " + j.error);
+    const arr = j.data || [];
+    setItems(arr);
+    setStatus("Loaded " + arr.length);
+    
+    // Switch to items zone and restore focus if any
+    setNavZone("items");
+    restoreFocus("items", section, cat);
+  }, [section, rememberFocus, restoreFocus]);
 
-  async function playItem(item) {
+  const playItem = useCallback(async (item) => {
     setSelectedItem(item);
     setStatus("Creating play link...");
     const cmd = cmdOf(item);
@@ -96,57 +130,189 @@ function App() {
     if (section === "Media library") type = "vod";
     if (section === "Radio stations") type = "radio";
 
-    try {
-      const j = await api(`/api/create-link?type=${type}&cmd=${encodeURIComponent(cmd)}`);
-      console.log("PLAY", j);
-      if (!j.ok || !j.url) return setStatus(j.error || "Play failed");
-      setPlayUrl(j.url);
-      setStatus("Playing");
-    } catch (e) {
-      setStatus("Play failed: " + e.message);
-    }
-  }
+    const j = await api(`/api/create-link?type=${type}&cmd=${encodeURIComponent(cmd)}`);
+    if (!j.ok || !j.url) return setStatus(j.error || "Play failed");
+    setPlayUrl(j.url);
+    setStatus("Playing");
+  }, [section]);
 
-  useEffect(() => { loadSection("Live streams"); }, []);
+  useEffect(() => { loadSection("Live streams"); }, []); // Initial load only
+
+  // Remote Support Logic
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      const key = e.keyCode || e.which;
+
+      // Tizen Back: 10009, Escape: 27
+      if (key === 10009 || key === 27) {
+        if (navZone === "items") {
+          rememberFocus();
+          setNavZone("categories");
+          restoreFocus("categories", section, selectedCat);
+        } else if (navZone === "categories") {
+          rememberFocus();
+          setNavZone("menu");
+          setFocusIndex(MENU.indexOf(section));
+        }
+        return;
+      }
+
+      let currentItemsCount = 0;
+      if (navZone === "menu") currentItemsCount = MENU.length;
+      if (navZone === "categories") currentItemsCount = categories.length + (section !== "Settings" && section !== "Shows archive" ? 1 : 0);
+      if (navZone === "items") currentItemsCount = items.length;
+
+      if (key === 38) { // Up
+        setFocusIndex(prev => Math.max(0, prev - 1));
+      } else if (key === 40) { // Down
+        setFocusIndex(prev => Math.min(currentItemsCount - 1, prev + 1));
+      } else if (key === 37) { // Left
+        if (navZone === "items") {
+          rememberFocus();
+          setNavZone("categories");
+          restoreFocus("categories", section, selectedCat);
+        } else if (navZone === "categories") {
+          rememberFocus();
+          setNavZone("menu");
+          setFocusIndex(MENU.indexOf(section));
+        }
+      } else if (key === 39) { // Right
+        if (navZone === "menu") {
+          if (categories.length > 0) {
+            rememberFocus();
+            setNavZone("categories");
+            restoreFocus("categories", section, null);
+          }
+        } else if (navZone === "categories") {
+          if (items.length > 0) {
+            rememberFocus();
+            // Enter logic will trigger loadItems which handles navZone/restoreFocus
+            // But if we just want to jump right:
+            const hasAll = section !== "Settings" && section !== "Shows archive";
+            const cat = focusIndex === 0 && hasAll ? { id: "*", title: "All" } : categories[hasAll ? focusIndex - 1 : focusIndex];
+            if (cat && (selectedCat === cat || (cat.id === "*" && selectedCat?.id === "*"))) {
+              setNavZone("items");
+              restoreFocus("items", section, selectedCat);
+            }
+          }
+        }
+      } else if (key === 13) { // Enter
+        if (navZone === "menu") {
+          loadSection(MENU[focusIndex]);
+        } else if (navZone === "categories") {
+          const hasAll = section !== "Settings" && section !== "Shows archive";
+          if (hasAll && focusIndex === 0) {
+            loadItems({ id: "*", title: "All" });
+          } else {
+            const cat = categories[hasAll ? focusIndex - 1 : focusIndex];
+            if (section === "Shows archive") {
+              playItem(cat);
+            } else {
+              loadItems(cat);
+            }
+          }
+        } else if (navZone === "items") {
+          playItem(items[focusIndex]);
+        }
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [navZone, focusIndex, categories, items, section, selectedCat, loadSection, loadItems, playItem, rememberFocus, restoreFocus]);
+
+  // Scroll focused element into view
+  useEffect(() => {
+    const focusedEl = document.querySelector(".focused");
+    if (focusedEl) {
+      focusedEl.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+  }, [focusIndex, navZone]);
+
+  const renderCategories = () => {
+    const hasAll = section !== "Settings" && section !== "Shows archive";
+    const elements = [];
+    if (hasAll) {
+      elements.push(
+        <div 
+          key="all" 
+          className={`row ${selectedCat?.id === "*" ? "active" : ""} ${navZone === "categories" && focusIndex === 0 ? "focused" : ""}`}
+          onClick={() => loadItems({ id: "*", title: "All" })}
+        >
+          All
+        </div>
+      );
+    }
+    categories.forEach((c, i) => {
+      const actualIndex = hasAll ? i + 1 : i;
+      elements.push(
+        <div 
+          key={i} 
+          className={`row ${selectedCat === c ? "active" : ""} ${navZone === "categories" && focusIndex === actualIndex ? "focused" : ""}`}
+          onClick={() => section === "Shows archive" ? playItem(c) : loadItems(c)}
+        >
+          {titleOf(c)}
+        </div>
+      );
+    });
+    return elements;
+  };
 
   return (
     <div className="app">
-      <aside className="side">
-        <h1>OTT Navigator</h1>
-        {MENU.map(m => (
-          <button key={m} className={section === m ? "menu active" : "menu"} onClick={() => loadSection(m)}>
-            {m}
-          </button>
-        ))}
+      <aside className={`side ${navZone === "menu" ? "focused-zone" : ""}`}>
+        <div className="logo">
+          <div className="icon"></div>
+          <h1>STALKER TV</h1>
+        </div>
+        <div className="menu-list">
+          {MENU.map((m, i) => (
+            <button 
+              key={m} 
+              className={`menu ${section === m ? "active" : ""} ${navZone === "menu" && focusIndex === i ? "focused" : ""}`}
+              onClick={() => loadSection(m)}
+            >
+              {m}
+            </button>
+          ))}
+        </div>
       </aside>
 
-      <main className="col">
+      <main className={`col ${navZone === "categories" ? "focused-zone" : ""}`}>
         <h2>{section}</h2>
         <div className="status">{status}</div>
-
-        {section !== "Settings" && section !== "Shows archive" && (
-          <div className={!selectedCat ? "row active" : "row"} onClick={() => loadItems({ id: "*", title: "All" })}>
-            All
-          </div>
-        )}
-
-        {categories.map((c, i) => (
-          <div key={i} className={selectedCat === c ? "row active" : "row"} onClick={() => section === "Shows archive" ? playItem(c) : loadItems(c)}>
-            {titleOf(c)}
-          </div>
-        ))}
+        <div className="list">
+          {renderCategories()}
+        </div>
       </main>
 
-      <section className="col content">
-        <h2>{selectedCat ? titleOf(selectedCat) : "Content"}</h2>
+      <section className={`col content ${navZone === "items" ? "focused-zone" : ""}`}>
+        <div className="content-header">
+          <h2>{selectedCat ? titleOf(selectedCat) : "Content"}</h2>
+          <div className="time">{new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
+        </div>
 
-        {playUrl && <video className="player" src={playUrl} controls autoPlay playsInline />}
+        <div className="player-container">
+          {playUrl ? (
+            <video className="player" src={playUrl} controls autoPlay playsInline />
+          ) : (
+            <div className="player-placeholder">
+              <div className="shimmer"></div>
+              <span>Select content to start playback</span>
+            </div>
+          )}
+        </div>
 
-        <div className="list">
+        <div className="list items-list">
           {items.map((it, i) => (
-            <div key={i} className={selectedItem === it ? "row active" : "row"} onClick={() => playItem(it)}>
-              <span className="num">{it.number || it.num || i + 1}</span>
-              <span>{titleOf(it)}</span>
+            <div 
+              key={i} 
+              className={`row ${selectedItem === it ? "active" : ""} ${navZone === "items" && focusIndex === i ? "focused" : ""}`}
+              onClick={() => playItem(it)}
+            >
+              <span className="num">{(it.number || it.num || i + 1).toString().padStart(2, '0')}</span>
+              <span className="title">{titleOf(it)}</span>
+              {it.epg_progname && <span className="epg">{it.epg_progname}</span>}
             </div>
           ))}
         </div>
