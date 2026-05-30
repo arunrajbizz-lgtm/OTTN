@@ -10,13 +10,13 @@ app.use(cors({ origin: "*" }));
 app.use(express.json());
 
 // Credentials from "Working Code"
-const PORTAL = "http://portal.airtel4k.co/stalker_portal";
-const MAC = "00:1A:79:00:33:73";
-const SN = "1F9D845D53937";
+const PORTAL = "http://play.tatasky.xyz/stalker_portal";
+const MAC = "00:1A:79:07:B2:B8";
+const SN = "BAFDBC492E3DD";
 
-const DEVICE_ID = "E7850E9E868690599594841E585090CE4EC12ECAD35B56C33398B6CE4E4CB73A";
-const DEVICE_ID2 = DEVICE_ID;
-const SIGNATURE = "7ADA87DAB05B39942944F103E85277846B6292D0D2788AE896BA56406970E663";
+const DEVICE_ID = "E13DBFB1CC4977AE6A6202606271DF6B801D2A7779AE301A732B86C98AC4E642";
+const DEVICE_ID2 = "E13DBFB1CC4977AE6A6202606271DF6B801D2A7779AE301A732B86C98AC4E642";
+const SIGNATURE = "";
 const HW_VERSION_2 = DEVICE_ID.toLowerCase();
 
 const USER_AGENT = "Mozilla/5.0 (QtEmbedded; U; Linux; C) AppleWebKit/533.3 (KHTML, like Gecko) MAG250 stbapp ver: 2 rev: 250 Safari/533.3";
