@@ -1,20 +1,20 @@
 const express = require("express");
 const cors = require("cors");
 const axios = require("axios");
-const TMDB_API_KEY = process.env.TMDB_API_KEY;
+
 const app = express();
 app.use(cors({ origin: "*" }));
 app.use(express.json());
 
-const PORT = process.env.PORT || 3001;
+const PORT = 3001;
 
-const PORTAL = "http://play.tatasky.xyz/stalker_portal";
-const MAC = "00:1A:79:07:B2:B8";
+const PORTAL = "http://portal.airtel4k.co/stalker_portal";
+const MAC = "00:1A:79:00:33:73";
 
-const SN = "BAFDBC492E3DD";
-const DEVICE_ID = "E13DBFB1CC4977AE6A6202606271DF6B801D2A7779AE301A732B86C98AC4E642";
-const DEVICE_ID2 = "E13DBFB1CC4977AE6A6202606271DF6B801D2A7779AE301A732B86C98AC4E642";
-const SIGNATURE = "";
+const SN = "1F9D845D53937";
+const DEVICE_ID = "E7850E9E868690599594841E585090CE4EC12ECAD35B56C33398B6CE4E4CB73A";
+const DEVICE_ID2 = "E7850E9E868690599594841E585090CE4EC12ECAD35B56C33398B6CE4E4CB73A";
+const SIGNATURE = "7ADA87DAB05B39942944F103E85277846B6292D0D2788AE896BA56406970E663";
 const HW_VERSION_2 = DEVICE_ID.toLowerCase();
 
 const USER_AGENT =
@@ -22,8 +22,6 @@ const USER_AGENT =
 
 let token = "";
 let randomValue = "";
-let lastAuth = 0;
-const AUTH_TTL = 10 * 60 * 1000;
 
 function getHeaders(useAuth = false) {
   const headers = {
@@ -146,31 +144,10 @@ function authFailed(data) {
 }
 
 async function ensureAuth() {
-
-  const now = Date.now();
-
-  if (
-    token &&
-    now - lastAuth < AUTH_TTL
-  ) {
-    return true;
-  }
-
   await doHandshake();
-
   const profile = await getProfile();
-
-  if (authFailed(profile)) {
-    throw new Error(
-      profile?.js?.msg ||
-      profile?.js?.error ||
-      "Authorization failed"
-    );
-  }
-
-  lastAuth = now;
-
-  return true;
+  if (authFailed(profile)) throw new Error(profile?.js?.msg || profile?.js?.error || "Authorization failed");
+  return profile;
 }
 
 
@@ -378,61 +355,7 @@ app.get("/api/debug/:type/:action", async (req, res) => {
     res.json({ ok: true, count: listFrom(data).length, data: listFrom(data), raw: data });
   } catch (e) { res.json({ ok: false, error: e.message }); }
 });
-app.get("/api/tmdb/search", async (req, res) => {
-  try {
-    const title = req.query.title;
-
-    if (!title) {
-      return res.json({
-        ok: false,
-        error: "Missing title"
-      });
-    }
-
-    const response = await axios.get(
-      "https://api.themoviedb.org/3/search/movie",
-      {
-        params: {
-          api_key: TMDB_API_KEY,
-          query: title
-        }
-      }
-    );
-
-    const movie = response.data.results?.[0];
-
-    if (!movie) {
-      return res.json({
-        ok: false,
-        error: "Not found"
-      });
-    }
-
-    res.json({
-      ok: true,
-      id: movie.id,
-      title: movie.title,
-      overview: movie.overview,
-      rating: movie.vote_average,
-      year: movie.release_date?.substring(0, 4),
-
-      poster: movie.poster_path
-        ? `https://image.tmdb.org/t/p/w500${movie.poster_path}`
-        : "",
-
-      backdrop: movie.backdrop_path
-        ? `https://image.tmdb.org/t/p/original${movie.backdrop_path}`
-        : ""
-    });
-
-  } catch (e) {
-    res.json({
-      ok: false,
-      error: e.message
-    });
-  }
-});
 
 app.listen(PORT, "0.0.0.0", () => {
-  console.log(`Backend running on port ${PORT}`);
+  console.log(`Backend running: http://192.168.1.10:${PORT}`);
 });
