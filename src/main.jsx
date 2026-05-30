@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import ReactDOM from "react-dom/client";
 import "./style.css";
 
-const BACKEND = "http://192.168.1.10:3001";
+const BACKEND = "https://ottn-production.up.railway.app";
 
 const MENU = ["Live streams", "Shows archive", "Media library", "Radio stations", "Settings"];
 
