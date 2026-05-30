@@ -9,28 +9,44 @@ const TMDB_API_KEY = process.env.TMDB_API_KEY;
 app.use(cors({ origin: "*" }));
 app.use(express.json());
 
-// Credentials from "Working Code"
-const PORTAL = "http://play.tatasky.xyz/stalker_portal";
-const MAC = "00:1A:79:07:B2:B8";
-const SN = "BAFDBC492E3DD";
+const PROVIDERS = [
+  {
+    id: "airtel4k",
+    name: "Airtel 4K (Working)",
+    portal: "http://portal.airtel4k.co/stalker_portal",
+    mac: "00:1A:79:00:33:73",
+    sn: "1F9D845D53937",
+    deviceId: "E7850E9E868690599594841E585090CE4EC12ECAD35B56C33398B6CE4E4CB73A",
+    deviceId2: "E7850E9E868690599594841E585090CE4EC12ECAD35B56C33398B6CE4E4CB73A",
+    signature: "7ADA87DAB05B39942944F103E85277846B6292D0D2788AE896BA56406970E663"
+  },
+  {
+    id: "tatasky",
+    name: "TataSky Portal",
+    portal: "http://play.tatasky.xyz/stalker_portal",
+    mac: "00:1A:79:07:B2:B8",
+    sn: "BAFDBC492E3DD",
+    deviceId: "E13DBFB1CC4977AE6A6202606271DF6B801D2A7779AE301A732B86C98AC4E642",
+    deviceId2: "E13DBFB1CC4977AE6A6202606271DF6B801D2A7779AE301A732B86C98AC4E642",
+    signature: ""
+  }
+];
 
-const DEVICE_ID = "E13DBFB1CC4977AE6A6202606271DF6B801D2A7779AE301A732B86C98AC4E642";
-const DEVICE_ID2 = "E13DBFB1CC4977AE6A6202606271DF6B801D2A7779AE301A732B86C98AC4E642";
-const SIGNATURE = "";
-const HW_VERSION_2 = DEVICE_ID.toLowerCase();
+let currentIdx = 0; // Default to Airtel4K
+let token = "";
+let randomValue = "";
 
 const USER_AGENT = "Mozilla/5.0 (QtEmbedded; U; Linux; C) AppleWebKit/533.3 (KHTML, like Gecko) MAG250 stbapp ver: 2 rev: 250 Safari/533.3";
 
-let token = "";
-let randomValue = "";
+function p() { return PROVIDERS[currentIdx]; }
 
 function getHeaders(useAuth = false) {
   const headers = {
     "User-Agent": USER_AGENT,
     "X-User-Agent": "Model: MAG250; Link: WiFi",
-    Referer: `${PORTAL}/c/`,
-    Origin: PORTAL,
-    Cookie: `mac=${MAC}; stb_lang=en; timezone=Asia/Kolkata`,
+    Referer: `${p().portal}/c/`,
+    Origin: p().portal,
+    Cookie: `mac=${p().mac}; stb_lang=en; timezone=Asia/Kolkata`,
     Accept: "*/*",
     Connection: "Keep-Alive",
   };
@@ -39,9 +55,8 @@ function getHeaders(useAuth = false) {
 }
 
 async function stalkerRequest(params, useAuth = false) {
-  console.log(`[Portal] Requesting: ${params.action || params.type}`);
   try {
-    const res = await axios.get(`${PORTAL}/server/load.php`, {
+    const res = await axios.get(`${p().portal}/server/load.php`, {
       params,
       headers: getHeaders(useAuth),
       timeout: 30000,
@@ -49,7 +64,7 @@ async function stalkerRequest(params, useAuth = false) {
     });
     return res.data;
   } catch (err) {
-    console.error(`[Portal] Request Error:`, err.message);
+    console.error(`[Portal] ${p().name} Request Error:`, err.message);
     throw err;
   }
 }
@@ -70,21 +85,21 @@ async function getProfile() {
     hd: "1",
     ver: "ImageDescription: 0.2.18-r22-pub-270; ImageDate: Tue Dec 19 11:33:53 EET 2017; PORTAL version: 5.6.1; API Version: JS API version: 328; STB API version: 134; Player Engine version: 0x566",
     num_banks: "2",
-    sn: SN,
+    sn: p().sn,
     stb_type: "MAG250",
     image_version: "218",
     video_out: "hdmi",
-    device_id: DEVICE_ID,
-    device_id2: DEVICE_ID2,
-    signature: SIGNATURE,
+    device_id: p().deviceId,
+    device_id2: p().deviceId2,
+    signature: p().signature,
     auth_second_step: "1",
     hw_version: "1.7-BD-00",
     not_valid_token: "0",
     client_type: "STB",
-    hw_version_2: HW_VERSION_2,
+    hw_version_2: p().deviceId.toLowerCase(),
     timestamp: Math.floor(Date.now() / 1000),
     api_signature: "263",
-    metrics: JSON.stringify({ mac: MAC, sn: SN, model: "MAG250", type: "STB", uid: DEVICE_ID, random: randomValue }),
+    metrics: JSON.stringify({ mac: p().mac, sn: p().sn, model: "MAG250", type: "STB", uid: p().deviceId, random: randomValue }),
     JsHttpRequest: "1-xml",
   }, true);
 }
@@ -105,20 +120,32 @@ function normalizeArray(data) {
 }
 
 function extractUrl(data) {
-  let cmd = data?.js?.cmd || data?.js?.data?.cmd || data?.cmd || data?.data?.cmd || "";
-  cmd = String(cmd).trim();
-  cmd = cmd.replace(/^ffmpeg\s+/i, "").trim();
-  return cmd;
+  let cmd = data?.js?.cmd || data?.js?.url || data?.js?.data?.cmd || data?.cmd || data?.url || data?.results || "";
+  if (typeof data?.js === "string" && data.js.startsWith("http")) cmd = data.js;
+  return String(cmd).trim().replace(/^(ffmpeg|ffrt|mpv|auto)\s+/i, "").trim();
 }
 
 // Routes
-app.get("/", (req, res) => res.send("POOMANI TV Backend Live (Airtel4K)"));
-app.get("/health", (req, res) => res.json({ status: "ok", portal: "reachable" }));
+app.get("/", (req, res) => res.send(`POOMANI TV Active: ${p().name}`));
+app.get("/health", (req, res) => res.json({ status: "ok", active: p().name }));
+
+app.get("/api/providers", (req, res) => {
+  res.json({ ok: true, providers: PROVIDERS.map((pr, i) => ({ id: pr.id, name: pr.name, active: i === currentIdx })) });
+});
+
+app.post("/api/select-provider", (req, res) => {
+  const { id } = req.body;
+  const idx = PROVIDERS.findIndex(pr => pr.id === id);
+  if (idx === -1) return res.json({ ok: false, error: "Provider not found" });
+  currentIdx = idx;
+  token = ""; // Reset session
+  res.json({ ok: true, active: p().name });
+});
 
 app.get(["/api/connect", "/connect"], async (req, res) => {
   try {
     const profile = await ensureAuth();
-    res.json({ ok: true, token, profile });
+    res.json({ ok: true, token, profile, provider: p().name });
   } catch (err) { res.json({ ok: false, error: err.message }); }
 });
 
@@ -126,7 +153,7 @@ app.get("/api/live-categories", async (req, res) => {
   try {
     await ensureAuth();
     const data = await stalkerRequest({ type: "itv", action: "get_genres", JsHttpRequest: "1-xml" }, true);
-    res.json({ ok: true, data: normalizeArray(data), raw: data });
+    res.json({ ok: true, data: normalizeArray(data) });
   } catch (err) { res.json({ ok: false, error: err.message }); }
 });
 
@@ -134,11 +161,8 @@ app.get("/api/live-channels", async (req, res) => {
   try {
     await ensureAuth();
     const genre = req.query.genre || "*";
-    const data = await stalkerRequest({
-      type: "itv", action: "get_ordered_list", genre, force_ch_link_check: "",
-      fav: "0", sortby: "number", hd: "0", p: "1", JsHttpRequest: "1-xml"
-    }, true);
-    res.json({ ok: true, data: normalizeArray(data), raw: data });
+    const data = await stalkerRequest({ type: "itv", action: "get_ordered_list", genre, fav: "0", sortby: "number", hd: "0", p: "1", JsHttpRequest: "1-xml" }, true);
+    res.json({ ok: true, data: normalizeArray(data) });
   } catch (err) { res.json({ ok: false, error: err.message }); }
 });
 
@@ -146,13 +170,10 @@ app.get("/api/create-link", async (req, res) => {
   try {
     await ensureAuth();
     const cmd = req.query.cmd || "";
-    if (!cmd) return res.json({ ok: false, error: "Missing cmd" });
-    const data = await stalkerRequest({
-      type: "itv", action: "create_link", cmd, series: "0",
-      forced_storage: "0", disable_ad: "0", download: "0", JsHttpRequest: "1-xml"
-    }, true);
+    const type = req.query.type || "itv";
+    const data = await stalkerRequest({ type, action: "create_link", cmd, series: "0", forced_storage: "0", disable_ad: "0", download: "0", JsHttpRequest: "1-xml" }, true);
     const playUrl = extractUrl(data);
-    res.json({ ok: !!playUrl, url: playUrl, raw: data, error: playUrl ? "" : "No play URL returned" });
+    res.json({ ok: !!playUrl, url: playUrl, error: playUrl ? "" : "No URL returned" });
   } catch (err) { res.json({ ok: false, error: err.message }); }
 });
 
@@ -160,7 +181,7 @@ app.get("/api/media-library", async (req, res) => {
   try {
     await ensureAuth();
     const data = await stalkerRequest({ type: "vod", action: "get_categories", JsHttpRequest: "1-xml" }, true);
-    res.json({ ok: true, data: normalizeArray(data), raw: data });
+    res.json({ ok: true, data: normalizeArray(data) });
   } catch (err) { res.json({ ok: false, error: err.message }); }
 });
 
@@ -168,10 +189,8 @@ app.get("/api/vod-list", async (req, res) => {
   try {
     await ensureAuth();
     const category = req.query.category || "*";
-    const data = await stalkerRequest({
-      type: "vod", action: "get_ordered_list", category, fav: "0", sortby: "added", JsHttpRequest: "1-xml"
-    }, true);
-    res.json({ ok: true, data: normalizeArray(data), raw: data });
+    const data = await stalkerRequest({ type: "vod", action: "get_ordered_list", category, fav: "0", sortby: "added", JsHttpRequest: "1-xml" }, true);
+    res.json({ ok: true, data: normalizeArray(data) });
   } catch (err) { res.json({ ok: false, error: err.message }); }
 });
 
@@ -179,19 +198,19 @@ app.get("/api/radio", async (req, res) => {
   try {
     await ensureAuth();
     const data = await stalkerRequest({ type: "radio", action: "get_categories", JsHttpRequest: "1-xml" }, true);
-    res.json({ ok: true, data: normalizeArray(data), raw: data });
+    res.json({ ok: true, data: normalizeArray(data) });
   } catch (err) { res.json({ ok: false, error: err.message }); }
 });
 
 app.get("/api/tmdb/search", async (req, res) => {
   try {
     const title = req.query.title;
-    if (!title || !TMDB_API_KEY) return res.json({ ok: false, error: "Missing title or key" });
+    if (!title || !TMDB_API_KEY) return res.json({ ok: false });
     const response = await axios.get("https://api.themoviedb.org/3/search/movie", { params: { api_key: TMDB_API_KEY, query: title } });
     const movie = response.data.results?.[0];
-    if (!movie) return res.json({ ok: false, error: "Not found" });
+    if (!movie) return res.json({ ok: false });
     res.json({ ok: true, title: movie.title, overview: movie.overview, rating: movie.vote_average, poster: movie.poster_path ? `https://image.tmdb.org/t/p/w500${movie.poster_path}` : "" });
-  } catch (e) { res.json({ ok: false, error: e.message }); }
+  } catch (e) { res.json({ ok: false }); }
 });
 
 app.listen(PORT, "0.0.0.0", () => {

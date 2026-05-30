@@ -8,7 +8,6 @@ import {
   Settings, 
   Search, 
   Heart, 
-  ChevronRight, 
   Play, 
   Info,
   Clock,
@@ -34,6 +33,93 @@ const idOf = (x) => x?.id || x?.category_id || x?.genre_id || x?.tv_genre_id || 
 const cmdOf = (x) => x?.cmd || x?.cmd_1 || x?.url || x?.stream_url || x?.file || x?.cmds?.[0]?.url || "";
 const thumbOf = (it) => it?.screenshot || it?.logo || it?.tv_genre_logo || "";
 
+/**
+ * Samsung AVPlay Utility
+ */
+const AVPlayer = {
+  isAvailable: !!(window.webapis && window.webapis.avplay),
+  
+  init: function() {
+    if (!this.isAvailable) return;
+    try {
+      // Official key registration
+      const keys = ["MediaPlay", "MediaPause", "MediaStop", "MediaRewind", "MediaFastForward"];
+      keys.forEach(key => {
+        try {
+          window.tizen.tvinputdevice.registerKey(key);
+        } catch(e) {}
+      });
+    } catch (e) {
+      console.error("AVPlayer Init Error", e);
+    }
+  },
+
+  play: function(url, onStatus) {
+    if (!this.isAvailable) {
+      console.warn("AVPlay not available, falling back to log");
+      return;
+    }
+
+    try {
+      window.webapis.avplay.stop();
+      window.webapis.avplay.open(url);
+      
+      // Full screen by default or use specific rect
+      window.webapis.avplay.setDisplayRect(0, 0, 1920, 1080);
+      
+      // Advanced Listener
+      window.webapis.avplay.setListener({
+        onbufferingstart: () => onStatus("Buffering..."),
+        onbufferingcomplete: () => onStatus("Playing"),
+        onstreamcompleted: () => onStatus("Finished"),
+        onerror: (err) => onStatus("AVPlay Error: " + err),
+        onpreparecomplete: () => {
+          window.webapis.avplay.play();
+        }
+      });
+
+      // Optimized for Stalker Streams
+      window.webapis.avplay.prepareAsync();
+    } catch (e) {
+      onStatus("AVPlay Exception: " + e.message);
+    }
+  },
+
+  stop: function() {
+    if (this.isAvailable) window.webapis.avplay.stop();
+  },
+
+  pause: function() {
+    if (this.isAvailable) window.webapis.avplay.pause();
+  },
+
+  resume: function() {
+    if (this.isAvailable) window.webapis.avplay.play();
+  }
+};
+
+/**
+ * Persistent Cache Utility
+ */
+const Cache = {
+  get: (key) => {
+    try {
+      const data = localStorage.getItem(`cache_${key}`);
+      return data ? JSON.parse(data) : null;
+    } catch(e) { return null; }
+  },
+  set: (key, val) => {
+    try {
+      localStorage.setItem(`cache_${key}`, JSON.stringify(val));
+    } catch(e) {}
+  },
+  clear: () => {
+    Object.keys(localStorage).forEach(k => {
+      if (k.startsWith("cache_")) localStorage.removeItem(k);
+    });
+  }
+};
+
 function App() {
   const [section, setSection] = useState("Live streams");
   const [categories, setCategories] = useState([]);
@@ -41,17 +127,47 @@ function App() {
   const [selectedCat, setSelectedCat] = useState(null);
   const [selectedItem, setSelectedItem] = useState(null);
   const [status, setStatus] = useState("Ready");
-  const [playUrl, setPlayUrl] = useState("");
+  const [isPlaying, setIsPlaying] = useState(false);
   const [favorites, setFavorites] = useState(() => JSON.parse(localStorage.getItem("favs") || "[]"));
   
-  // Search State
-  const [searchQuery, setSearchQuery] = useState("");
+  // TMDB Data
   const [tmdbData, setTmdbData] = useState(null);
+  const [providers, setProviders] = useState([]);
 
   // Focus Management
   const [navZone, setNavZone] = useState("menu");
   const [focusIndex, setFocusIndex] = useState(0);
   const lastFocusMemory = useRef({});
+
+  useEffect(() => {
+    AVPlayer.init();
+    loadSection("Live streams");
+    fetchProviders();
+  }, []);
+
+  const fetchProviders = async () => {
+    const j = await api("/api/providers");
+    if (j.ok) setProviders(j.providers);
+  };
+
+  const selectProvider = async (id) => {
+    setStatus("Switching provider...");
+    try {
+      const r = await fetch(BACKEND + "/api/select-provider", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id })
+      });
+      const j = await r.json();
+      if (j.ok) {
+        Cache.clear();
+        await fetchProviders();
+        loadSection(section);
+      } else {
+        setStatus("Switch Error: " + j.error);
+      }
+    } catch(e) { setStatus("Switch Failed"); }
+  };
 
   const getFocusKey = useCallback(() => {
     const catId = selectedCat ? idOf(selectedCat) : "none";
@@ -76,7 +192,6 @@ function App() {
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       return await r.json();
     } catch (e) {
-      console.error("API Error:", e);
       return { ok: false, error: e.message };
     }
   }
@@ -88,7 +203,8 @@ function App() {
     setItems([]);
     setSelectedCat(null);
     setSelectedItem(null);
-    setPlayUrl("");
+    setIsPlaying(false);
+    AVPlayer.stop();
     setStatus("Loading...");
     setTmdbData(null);
 
@@ -103,7 +219,17 @@ function App() {
     if (sec === "Settings" || sec === "Search") {
       setNavZone("items");
       setFocusIndex(0);
-      setStatus(sec === "Settings" ? "Config" : "Type to search...");
+      setStatus(sec === "Settings" ? "Application Settings" : "Search Content");
+      return;
+    }
+
+    // Check Cache
+    const cachedCats = Cache.get(`cats_${sec}`);
+    if (cachedCats) {
+      setCategories(cachedCats);
+      setStatus(`${sec} (Cached)`);
+      setNavZone("categories");
+      restoreFocus("categories", sec, null);
       return;
     }
 
@@ -116,6 +242,7 @@ function App() {
     if (!j.ok) return setStatus("Error: " + j.error);
     const arr = j.data || [];
     setCategories(arr);
+    Cache.set(`cats_${sec}`, arr); // Store in cache
     setStatus(`${sec} - ${arr.length} categories`);
     
     setNavZone("categories");
@@ -127,10 +254,21 @@ function App() {
     setSelectedCat(cat);
     setItems([]);
     setSelectedItem(null);
-    setPlayUrl("");
     setStatus("Fetching content...");
 
     const id = idOf(cat);
+    const cacheKey = `items_${section}_${id}`;
+
+    // Check Cache
+    const cachedItems = Cache.get(cacheKey);
+    if (cachedItems) {
+      setItems(cachedItems);
+      setStatus(`${titleOf(cat)} (Cached)`);
+      setNavZone("items");
+      restoreFocus("items", section, cat);
+      return;
+    }
+
     let path = `/api/live-channels?genre=${encodeURIComponent(id)}`;
     if (section === "Shows archive") path = `/api/archive-list?genre=${encodeURIComponent(id)}`;
     if (section === "Media library") path = `/api/vod-list?category=${encodeURIComponent(id)}`;
@@ -140,18 +278,25 @@ function App() {
     if (!j.ok) return setStatus("Error: " + j.error);
     const arr = j.data || [];
     setItems(arr);
+    Cache.set(cacheKey, arr); // Store in cache
     setStatus(`${titleOf(cat)} - ${arr.length} items`);
     
     setNavZone("items");
     restoreFocus("items", section, cat);
   }, [section, rememberFocus, restoreFocus]);
 
+  const forceReload = useCallback(() => {
+    setStatus("Refreshing data...");
+    Cache.clear();
+    loadSection(section);
+  }, [section, loadSection]);
+
   const playItem = useCallback(async (item) => {
     if (!item) return;
     setSelectedItem(item);
-    setStatus("Connecting to stream...");
+    setStatus("Connecting...");
     const cmd = cmdOf(item);
-    if (!cmd) return setStatus("Stream not available");
+    if (!cmd) return setStatus("Not available");
 
     let type = "itv";
     if (section === "Media library") type = "vod";
@@ -160,10 +305,9 @@ function App() {
     const j = await api(`/api/create-link?type=${type}&cmd=${encodeURIComponent(cmd)}`);
     if (!j.ok || !j.url) return setStatus(j.error || "Link failed");
     
-    setPlayUrl(j.url);
-    setStatus("Playing: " + titleOf(item));
+    setIsPlaying(true);
+    AVPlayer.play(j.url, (msg) => setStatus(msg));
 
-    // Fetch TMDB Info for Movies
     if (section === "Media library") {
       const info = await api(`/api/tmdb/search?title=${encodeURIComponent(titleOf(item))}`);
       if (info.ok) setTmdbData(info);
@@ -172,44 +316,48 @@ function App() {
 
   const toggleFavorite = useCallback((item) => {
     const isFav = favorites.find(f => idOf(f) === idOf(item));
-    let newFavs;
-    if (isFav) {
-      newFavs = favorites.filter(f => idOf(f) !== idOf(item));
-    } else {
-      newFavs = [...favorites, item];
-    }
+    let newFavs = isFav ? favorites.filter(f => idOf(f) !== idOf(item)) : [...favorites, item];
     setFavorites(newFavs);
     localStorage.setItem("favs", JSON.stringify(newFavs));
   }, [favorites]);
 
-  useEffect(() => { loadSection("Live streams"); }, []);
-
-  // Remote Control Handlers
+  // Remote Support Logic
   useEffect(() => {
     const handleKeyDown = (e) => {
       const key = e.keyCode || e.which;
-      
+      const keyName = e.keyName || "";
+
       // Navigation counts
       let count = 0;
       if (navZone === "menu") count = MENU.length;
       if (navZone === "categories") count = categories.length + (section !== "Shows archive" ? 1 : 0);
-      if (navZone === "items") count = items.length;
+      if (navZone === "items") {
+        if (section === "Settings") count = providers.length + 1; // Providers + Refresh button
+        else count = items.length;
+      }
 
-      // Back / Escape
-      if (key === 10009 || key === 27) {
+      // Official Remote Key Handling
+      if (key === 10009 || key === 27) { // Back
+        if (isPlaying) {
+          setIsPlaying(false);
+          AVPlayer.stop();
+          return;
+        }
         if (navZone === "items") {
-          if (section === "Favorites" || section === "Settings" || section === "Search") {
-            setNavZone("menu");
-            setFocusIndex(MENU.findIndex(m => m.id === section));
-          } else {
-            setNavZone("categories");
-            restoreFocus("categories", section, selectedCat);
-          }
+          setNavZone(section === "Favorites" ? "menu" : "categories");
+          restoreFocus(navZone, section, selectedCat);
         } else if (navZone === "categories") {
           setNavZone("menu");
-          setFocusIndex(MENU.findIndex(m => m.id === section));
         }
         return;
+      }
+
+      // Media Keys
+      if (key === 415 || keyName === "MediaPlay") AVPlayer.resume();
+      if (key === 19 || keyName === "MediaPause") AVPlayer.pause();
+      if (key === 413 || keyName === "MediaStop") {
+        AVPlayer.stop();
+        setIsPlaying(false);
       }
 
       switch (key) {
@@ -220,75 +368,45 @@ function App() {
           setFocusIndex(p => Math.min(count - 1, p + 1));
           break;
         case 37: // Left
-          if (navZone === "items" && section !== "Favorites" && section !== "Settings" && section !== "Search") {
-            setNavZone("categories");
-            restoreFocus("categories", section, selectedCat);
-          } else if (navZone !== "menu") {
-            setNavZone("menu");
-            setFocusIndex(MENU.findIndex(m => m.id === section));
+          if (navZone !== "menu") {
+            setNavZone(navZone === "items" && section !== "Favorites" ? "categories" : "menu");
           }
           break;
         case 39: // Right
-          if (navZone === "menu") {
-            if (section === "Favorites" || section === "Settings" || section === "Search") {
-              setNavZone("items");
-              restoreFocus("items", section, null);
-            } else if (categories.length > 0) {
-              setNavZone("categories");
-              restoreFocus("categories", section, null);
-            }
-          } else if (navZone === "categories") {
-            if (items.length > 0) {
-              setNavZone("items");
-              restoreFocus("items", section, selectedCat);
-            }
-          }
+          if (navZone === "menu" && categories.length > 0) setNavZone("categories");
+          else if (navZone === "categories" && items.length > 0) setNavZone("items");
           break;
         case 13: // Enter
-          if (navZone === "menu") {
-            loadSection(MENU[focusIndex].id);
-          } else if (navZone === "categories") {
+          if (navZone === "menu") loadSection(MENU[focusIndex].id);
+          else if (navZone === "categories") {
             const hasAll = section !== "Shows archive";
-            if (hasAll && focusIndex === 0) {
-              loadItems({ id: "*", title: "All Channels" });
-            } else {
+            if (hasAll && focusIndex === 0) loadItems({ id: "*", title: "All" });
+            else {
               const cat = categories[hasAll ? focusIndex - 1 : focusIndex];
               if (section === "Shows archive") playItem(cat);
               else loadItems(cat);
             }
           } else if (navZone === "items") {
-            playItem(items[focusIndex]);
+            if (section === "Settings") {
+              if (focusIndex === 0) forceReload();
+              else {
+                const pr = providers[focusIndex - 1];
+                if (pr) selectProvider(pr.id);
+              }
+            } else {
+              playItem(items[focusIndex]);
+            }
           }
           break;
-        case 415: // Play
-        case 19:  // Pause
-          if (playUrl) {
-            const v = document.querySelector("video");
-            if (v) v.paused ? v.play() : v.pause();
-          }
-          break;
-        case 33: // Page Up (Yellow/Fav toggle usually)
-          if (navZone === "items" && items[focusIndex]) {
-            toggleFavorite(items[focusIndex]);
-          }
+        case 33: // PageUp (Fav)
+          if (navZone === "items" && items[focusIndex]) toggleFavorite(items[focusIndex]);
           break;
       }
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [navZone, focusIndex, categories, items, section, selectedCat, favorites, loadSection, loadItems, playItem, restoreFocus, toggleFavorite, playUrl]);
-
-  // Scroll into view
-  useEffect(() => {
-    const el = document.querySelector(".focused");
-    if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
-  }, [focusIndex, navZone]);
-
-  const gridItems = useMemo(() => {
-    if (section === "Live streams" || section === "Radio stations") return false;
-    return true;
-  }, [section]);
+  }, [navZone, focusIndex, categories, items, section, selectedCat, favorites, loadSection, loadItems, playItem, isPlaying, toggleFavorite]);
 
   return (
     <div className="app-shell">
@@ -298,82 +416,67 @@ function App() {
           <div className="brand-logo"><Tv /></div>
           <span>POOMANI TV</span>
         </div>
-        
         <div className="nav-links">
           {MENU.map((m, i) => (
-            <div 
-              key={m.id}
-              className={`nav-item ${section === m.id ? "current" : ""} ${navZone === "menu" && focusIndex === i ? "focused" : ""}`}
-            >
+            <div key={m.id} className={`nav-item ${section === m.id ? "current" : ""} ${navZone === "menu" && focusIndex === i ? "focused" : ""}`}>
               <m.icon size={28} />
               <span>{m.label}</span>
             </div>
           ))}
         </div>
-
         <div className="clock">
           <Clock size={20} />
           {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
         </div>
       </nav>
 
-      {/* Categories Column */}
+      {/* Categories */}
       {categories.length > 0 && (
         <section className={`cat-panel ${navZone === "categories" ? "active-zone" : ""}`}>
-          <div className="panel-header">
-            <h3>Categories</h3>
-          </div>
+          <div className="panel-header"><h3>Categories</h3></div>
           <div className="scroll-list">
             {section !== "Shows archive" && (
               <div className={`list-row ${selectedCat?.id === "*" ? "active" : ""} ${navZone === "categories" && focusIndex === 0 ? "focused" : ""}`}>
                 All Content
               </div>
             )}
-            {categories.map((c, i) => {
-              const idx = section !== "Shows archive" ? i + 1 : i;
-              return (
-                <div 
-                  key={i}
-                  className={`list-row ${selectedCat === c ? "active" : ""} ${navZone === "categories" && focusIndex === idx ? "focused" : ""}`}
-                >
-                  {titleOf(c)}
-                </div>
-              );
-            })}
+            {categories.map((c, i) => (
+              <div key={i} className={`list-row ${selectedCat === c ? "active" : ""} ${navZone === "categories" && focusIndex === (section !== "Shows archive" ? i + 1 : i) ? "focused" : ""}`}>
+                {titleOf(c)}
+              </div>
+            ))}
           </div>
         </section>
       )}
 
-      {/* Main Content Area */}
+      {/* Main Content */}
       <main className={`content-area ${navZone === "items" ? "active-zone" : ""}`}>
         <header className="main-header">
           <div className="header-info">
-            <h1>{section === "Favorites" ? "My Favorites" : (selectedCat ? titleOf(selectedCat) : section)}</h1>
-            <div className={`status-badge ${status.startsWith("Error") ? "error" : ""}`}>
-              {status.startsWith("Error") ? <AlertCircle size={14}/> : <Info size={14}/>}
+            <h1>{section === "Favorites" ? "My List" : (selectedCat ? titleOf(selectedCat) : section)}</h1>
+            <div className={`status-badge ${status.includes("Error") ? "error" : ""}`}>
+              {status.includes("Error") ? <AlertCircle size={14}/> : <Info size={14}/>}
               {status}
             </div>
           </div>
         </header>
 
-        {/* Video Player */}
+        {/* Video Area */}
         <div className="player-wrapper">
-          {playUrl ? (
-            <video className="main-player" src={playUrl} autoPlay controls />
-          ) : (
+          {!isPlaying && (
             <div className="player-empty">
               <Play size={64} className="play-icon" />
-              <span>Select an item to watch</span>
+              <span>Select content to start native playback</span>
             </div>
           )}
           
           {selectedItem && (
-            <div className="overlay-info">
+            <div className={`overlay-info ${isPlaying ? "visible" : ""}`}>
               <div className="meta">
                 <span className="channel-num">#{selectedItem.number || "00"}</span>
                 <h2>{titleOf(selectedItem)}</h2>
               </div>
-              {tmdbData?.ok && (
+              {tmdbData && (
                 <div className="tmdb-mini">
                   <div className="rating"><Star size={16} fill="gold" color="gold"/> {tmdbData.rating}</div>
                   <p>{tmdbData.overview?.substring(0, 150)}...</p>
@@ -383,16 +486,46 @@ function App() {
           )}
         </div>
 
-        {/* Items List/Grid */}
-        <div className={`items-container ${gridItems ? "grid-mode" : "list-mode"}`}>
+        {/* Items */}
+        <div className={`items-container ${section === "Live streams" || section === "Radio stations" ? "list-mode" : "grid-mode"}`}>
+          {section === "Settings" && (
+             <div className="settings-panel" style={{width: '100%'}}>
+               <div 
+                 className={`item-card list-mode ${navZone === "items" && focusIndex === 0 ? "focused" : ""}`}
+                 onClick={forceReload}
+               >
+                 <span className="row-title">Refresh Data (Clear Cache)</span>
+                 <div className="row-right">
+                   <ChevronRight size={24} />
+                 </div>
+               </div>
+
+               <h3 style={{margin: '40px 0 20px', color: '#666', textTransform: 'uppercase', fontSize: '18px'}}>Select Provider</h3>
+               {providers.map((p, i) => (
+                 <div 
+                   key={p.id}
+                   className={`item-card list-mode ${p.active ? "active" : ""} ${navZone === "items" && focusIndex === (i + 1) ? "focused" : ""}`}
+                   onClick={() => selectProvider(p.id)}
+                 >
+                   <span className="row-title">{p.name}</span>
+                   <div className="row-right">
+                     {p.active && <div className="status-badge" style={{background: '#1688f0', color: 'white'}}>ACTIVE</div>}
+                     <ChevronRight size={24} />
+                   </div>
+                 </div>
+               ))}
+
+               <div className="status-badge info" style={{marginTop: '40px'}}>
+                 Version 1.3.0 - Multi-Provider Support
+               </div>
+             </div>
+          )}
+          
           {items.map((it, i) => {
             const isFav = favorites.some(f => idOf(f) === idOf(it));
             return (
-              <div 
-                key={i}
-                className={`item-card ${selectedItem === it ? "active" : ""} ${navZone === "items" && focusIndex === i ? "focused" : ""}`}
-              >
-                {gridItems ? (
+              <div key={i} className={`item-card ${selectedItem === it ? "active" : ""} ${navZone === "items" && focusIndex === i ? "focused" : ""}`}>
+                {section !== "Live streams" && section !== "Radio stations" ? (
                   <div className="card-inner">
                     <img src={thumbOf(it) || "https://placehold.co/300x170/1a1a1a/ffffff?text=No+Preview"} alt="" />
                     <div className="card-content">
