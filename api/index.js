@@ -177,11 +177,26 @@ async function pagedFallback(calls, maxPages = 50) {
 }
 
 // Routes
-app.get("/api/connect", async (req, res) => {
+app.get(["/api/connect", "/connect"], async (req, res) => {
+  console.log("[Route] GET /connect");
   try {
     const profile = await ensureAuth();
+    console.log("[Route] Auth Success");
     res.json({ ok: true, token, profile });
-  } catch (e) { res.json({ ok: false, error: e.message }); }
+  } catch (e) { 
+    console.error(`[Route] Auth Failed: ${e.message}`);
+    res.json({ ok: false, error: e.message }); 
+  }
+});
+
+app.get("/api/test-portal", async (req, res) => {
+  try {
+    const start = Date.now();
+    const r = await axios.get(PORTAL, { timeout: 5000 });
+    res.json({ ok: true, status: r.status, time: Date.now() - start });
+  } catch (e) {
+    res.json({ ok: false, error: e.message });
+  }
 });
 
 app.get("/api/live-categories", async (req, res) => {
