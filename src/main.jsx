@@ -141,12 +141,6 @@ function App() {
   var _section = useState("Live streams");
   var section = _section[0], setSection = _section[1];
   
-  useEffect(function() {
-    var script = document.createElement("script");
-    script.src = "$WEBAPIS/webapis/webapis.js";
-    script.onerror = function() { console.warn("WebAPI failed to load"); };
-    document.head.appendChild(script);
-  }, []);
 
   var _categories = useState([]);
   var categories = _categories[0], setCategories = _categories[1];
@@ -221,12 +215,12 @@ function App() {
   });
 
   useEffect(function() {
-    if (playUrl) {
-      document.body.classList.add("transparent");
-    } else {
-      document.body.classList.remove("transparent");
-    }
-  }, [playUrl]);
+  if (playUrl) {
+    document.body.classList.add("transparent");
+  } else {
+    document.body.classList.remove("transparent");
+  }
+}, [playUrl]);
 
   var _episodes = useState([]);
   var episodes = _episodes[0], setEpisodes = _episodes[1];
@@ -314,25 +308,31 @@ function App() {
 
   var initAVPlay = useCallback(async function(url) {
     if (!window.webapis || !window.webapis.avplay) return;
-    stopAVPlay();
-    try {
-webapis.avplay.setListener({
-  onbufferingstart: () => console.log("BUFFER START"),
-  onbufferingprogress: (p) => console.log("BUFFER", p),
-  onbufferingcomplete: () => console.log("BUFFER COMPLETE"),
 
-  onstreamcompleted: () => console.log("STREAM COMPLETED"),
+stopAVPlay();
 
-  onerror: (e) => console.log("AVPLAY ERROR", e),
+await new Promise(resolve => setTimeout(resolve, 300));
 
-  onerrormsg: (e, msg) => console.log("AVPLAY ERROR MSG", e, msg)
-});
-      window.webapis.avplay.open(url);
-      setAvplayState("IDLE");
-      
+try {
+
+  window.webapis.avplay.open(url);
+  setAvplayState("IDLE");
       try {
-        window.webapis.avplay.setBufferingConfig("PLAYER_BUFFER_FOR_PLAY", "PLAYER_BUFFER_SIZE_IN_SECOND", 10);
-        window.webapis.avplay.setBufferingConfig("PLAYER_BUFFER_FOR_RESUME", "PLAYER_BUFFER_SIZE_IN_SECOND", 5);
+  window.webapis.avplay.setBufferingParam(
+    "PLAYER_BUFFER_FOR_PLAY",
+    "PLAYER_BUFFER_SIZE_IN_SECOND",
+    10
+  );
+
+  window.webapis.avplay.setBufferingParam(
+    "PLAYER_BUFFER_FOR_RESUME",
+    "PLAYER_BUFFER_SIZE_IN_SECOND",
+    5
+  );
+} catch(e) {
+  console.log(e);
+}
+try {
         window.webapis.avplay.setStreamingProperty("SET_MODE_4K", "TRUE");
         window.webapis.avplay.setStreamingProperty("ADAPTIVE_INFO", "FIXED_MAX_RESOLUTION=3840X2160");
       } catch (e) {}
@@ -340,22 +340,33 @@ webapis.avplay.setListener({
       window.webapis.avplay.setDisplayMethod("PLAYER_DISPLAY_MODE_LETTER_BOX");
       window.webapis.avplay.setDisplayRect(0, 0, 1920, 1080);
       
-      var listener = {
-        onbufferingstart: function() { setStatus("Buffering..."); setAvplayState("IDLE"); },
-        onbufferingprogress: function(p) { setStatus("Buffering " + p + "%"); },
-        onbufferingcomplete: function() { 
-          setStatus("Playing"); setTimeout(function() { setStatus(""); }, 2000); setAvplayState("PLAYING");
-          try { var st = window.webapis.avplay.getState(); if (st !== "PLAYING" && st !== "NONE") window.webapis.avplay.play(); } catch(e) {}
-        },
-        oncurrentplaytime: function(t) { if (!stateRef.current.isSeeking) setCurrentTime(t / 1000); },
-        onerror: function(e) {
-  console.log("AVPLAY ERROR =", e);
-  setStatus("Playback Error " + e);
-},
-        onstreamcompleted: function() { stopAVPlay(); setPlayUrl(""); setNavZone("items"); }
-      };
+      const listener = {
+  onbufferingstart: function () {
+    console.log("Buffering start");
+  },
+
+  onbufferingprogress: function (percent) {
+    console.log("Buffering: " + percent + "%");
+  },
+
+  onbufferingcomplete: function () {
+    console.log("Buffering complete");
+  },
+
+  oncurrentplaytime: function (time) {},
+
+  onevent: function (eventType, eventData) {},
+
+  onerror: function (error) {
+    console.log("AVPlay Error:", error);
+  },
+
+  onstreamcompleted: function () {
+    console.log("Stream completed");
+  }
+};
       window.webapis.avplay.setListener(listener);
-      console.log("PLAY URL =", playUrl);
+      console.log("PLAY URL =", url);
       window.webapis.avplay.prepareAsync(
 function() {
         setAvplayState("READY");
@@ -409,7 +420,9 @@ function(err) {
     setPlaybackSpeed(1);
     if (!immediate) {
       if (channelFlipTimeout.current) clearTimeout(channelFlipTimeout.current);
-      channelFlipTimeout.current = setTimeout(function() { playItem(item, true); }, 1500);
+      channelFlipTimeout.current = setTimeout(function() {
+  playItem(item, true);
+}, 300);
       return;
     }
     setStatus("Loading Link...");
