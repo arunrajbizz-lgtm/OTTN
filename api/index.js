@@ -355,7 +355,7 @@ app.get("/api/debug/:type/:action", async (req, res) => {
     res.json({ ok: true, count: listFrom(data).length, data: listFrom(data), raw: data });
   } catch (e) { res.json({ ok: false, error: e.message }); }
 });
-app.get("/api/tmdb/search", async (req, res) => {
+app.get(["/api/tmdb/search", "/tmdb/search"], async (req, res) => {
   try {
     const title = req.query.title;
 
@@ -417,4 +417,5 @@ if (process.env.NODE_ENV !== "production") {
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Backend running on port ${PORT}`);
   });
+}}}
 }

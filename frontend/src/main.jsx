@@ -2,7 +2,7 @@ import React, { useEffect, useState, useRef, useCallback } from "react";
 import ReactDOM from "react-dom/client";
 import "./style.css";
 
-const BACKEND = "";
+const BACKEND = "https://ottn-production.up.railway.app";
 
 const MENU = ["Live streams", "Shows archive", "Media library", "Radio stations", "Settings"];
 
