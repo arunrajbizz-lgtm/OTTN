@@ -3,7 +3,12 @@ const cors = require("cors");
 const axios = require("axios");
 
 const app = express();
-app.use(cors({ origin: "*" }));
+app.use(cors({
+  origin: [
+    "https://ottn.vercel.app"
+  ],
+  credentials: true
+}));
 app.use(express.json());
 
 const PORT = 3001;
