@@ -9,7 +9,7 @@ const TMDB_API_KEY = process.env.TMDB_API_KEY;
 app.use(cors({ origin: "*" }));
 app.use(express.json());
 
-const PROVIDERS = [
+let PROVIDERS = [
   {
     id: "airtel4k",
     name: "Airtel 4K (Working)",
@@ -29,10 +29,11 @@ const PROVIDERS = [
     deviceId: "E13DBFB1CC4977AE6A6202606271DF6B801D2A7779AE301A732B86C98AC4E642",
     deviceId2: "E13DBFB1CC4977AE6A6202606271DF6B801D2A7779AE301A732B86C98AC4E642",
     signature: ""
-  }
+  },
+  { id: "p3", name: "Provider 3", portal: "", mac: "", sn: "", deviceId: "", deviceId2: "", signature: "" }
 ];
 
-let currentIdx = 0; // Default to Airtel4K
+let currentIdx = 0;
 let token = "";
 let randomValue = "";
 
@@ -40,105 +41,30 @@ const USER_AGENT = "Mozilla/5.0 (QtEmbedded; U; Linux; C) AppleWebKit/533.3 (KHT
 
 function p() { return PROVIDERS[currentIdx]; }
 
-function getHeaders(useAuth = false) {
-  const headers = {
-    "User-Agent": USER_AGENT,
-    "X-User-Agent": "Model: MAG250; Link: WiFi",
-    Referer: `${p().portal}/c/`,
-    Origin: p().portal,
-    Cookie: `mac=${p().mac}; stb_lang=en; timezone=Asia/Kolkata`,
-    Accept: "*/*",
-    Connection: "Keep-Alive",
-  };
-  if (useAuth && token) headers.Authorization = `Bearer ${token}`;
-  return headers;
-}
-
-async function stalkerRequest(params, useAuth = false) {
-  try {
-    const res = await axios.get(`${p().portal}/server/load.php`, {
-      params,
-      headers: getHeaders(useAuth),
-      timeout: 30000,
-      validateStatus: () => true,
-    });
-    return res.data;
-  } catch (err) {
-    console.error(`[Portal] ${p().name} Request Error:`, err.message);
-    throw err;
-  }
-}
-
-async function doHandshake() {
-  const data = await stalkerRequest({ type: "stb", action: "handshake", token: "", JsHttpRequest: "1-xml" });
-  token = data?.js?.token || "";
-  randomValue = data?.js?.random || "";
-  if (!token) throw new Error("Handshake failed");
-  return data;
-}
-
-async function getProfile() {
-  if (!token) await doHandshake();
-  return await stalkerRequest({
-    type: "stb",
-    action: "get_profile",
-    hd: "1",
-    ver: "ImageDescription: 0.2.18-r22-pub-270; ImageDate: Tue Dec 19 11:33:53 EET 2017; PORTAL version: 5.6.1; API Version: JS API version: 328; STB API version: 134; Player Engine version: 0x566",
-    num_banks: "2",
-    sn: p().sn,
-    stb_type: "MAG250",
-    image_version: "218",
-    video_out: "hdmi",
-    device_id: p().deviceId,
-    device_id2: p().deviceId2,
-    signature: p().signature,
-    auth_second_step: "1",
-    hw_version: "1.7-BD-00",
-    not_valid_token: "0",
-    client_type: "STB",
-    hw_version_2: p().deviceId.toLowerCase(),
-    timestamp: Math.floor(Date.now() / 1000),
-    api_signature: "263",
-    metrics: JSON.stringify({ mac: p().mac, sn: p().sn, model: "MAG250", type: "STB", uid: p().deviceId, random: randomValue }),
-    JsHttpRequest: "1-xml",
-  }, true);
-}
-
-async function ensureAuth() {
-  token = "";
-  randomValue = "";
-  await doHandshake();
-  return await getProfile();
-}
-
-function normalizeArray(data) {
-  if (Array.isArray(data)) return data;
-  if (Array.isArray(data?.js)) return data.js;
-  if (Array.isArray(data?.js?.data)) return data.js.data;
-  if (Array.isArray(data?.data)) return data.data;
-  return [];
-}
-
-function extractUrl(data) {
-  let cmd = data?.js?.cmd || data?.js?.url || data?.js?.data?.cmd || data?.cmd || data?.url || data?.results || "";
-  if (typeof data?.js === "string" && data.js.startsWith("http")) cmd = data.js;
-  return String(cmd).trim().replace(/^(ffmpeg|ffrt|mpv|auto)\s+/i, "").trim();
-}
-
-// Routes
-app.get("/", (req, res) => res.send(`POOMANI TV Active: ${p().name}`));
-app.get("/health", (req, res) => res.json({ status: "ok", active: p().name }));
+// Persistent helper (for Railway memory survival during process life)
+const saveProviders = () => { /* In a real app, write to disk/db. Here we keep in memory */ };
 
 app.get("/api/providers", (req, res) => {
-  res.json({ ok: true, providers: PROVIDERS.map((pr, i) => ({ id: pr.id, name: pr.name, active: i === currentIdx })) });
+  res.json({ ok: true, providers: PROVIDERS.map((pr, i) => ({ ...pr, active: i === currentIdx })) });
+});
+
+app.post("/api/update-provider", (req, res) => {
+  const { id, name, portal, mac, sn, deviceId, deviceId2, signature } = req.body;
+  const idx = PROVIDERS.findIndex(pr => pr.id === id);
+  if (idx === -1) return res.json({ ok: false, error: "Provider slot not found" });
+  
+  PROVIDERS[idx] = { ...PROVIDERS[idx], name, portal, mac, sn, deviceId, deviceId2, signature };
+  saveProviders();
+  res.json({ ok: true, message: "Saved" });
 });
 
 app.post("/api/select-provider", (req, res) => {
   const { id } = req.body;
   const idx = PROVIDERS.findIndex(pr => pr.id === id);
   if (idx === -1) return res.json({ ok: false, error: "Provider not found" });
+  
   currentIdx = idx;
-  token = ""; // Reset session
+  token = ""; // Force re-auth
   res.json({ ok: true, active: p().name });
 });
 

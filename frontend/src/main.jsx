@@ -145,9 +145,30 @@ function App() {
     fetchProviders();
   }, []);
 
-  const fetchProviders = async () => {
-    const j = await api("/api/providers");
-    if (j.ok) setProviders(j.providers);
+  const [editingProvider, setEditingProvider] = useState(null);
+
+  const saveProvider = async (p) => {
+    setStatus("Saving...");
+    try {
+      const r = await fetch(BACKEND + "/api/update-provider", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(p)
+      });
+      const j = await r.json();
+      if (j.ok) {
+        setEditingProvider(null);
+        await fetchProviders();
+        setStatus("Provider saved");
+      }
+    } catch(e) { setStatus("Save failed"); }
+  };
+
+  const handleProviderInput = (field, currentVal) => {
+    const val = prompt(`Enter ${field}:`, currentVal || "");
+    if (val !== null) {
+      setEditingProvider(prev => ({ ...prev, [field]: val }));
+    }
   };
 
   const selectProvider = async (id) => {
@@ -167,6 +188,12 @@ function App() {
         setStatus("Switch Error: " + j.error);
       }
     } catch(e) { setStatus("Switch Failed"); }
+  };
+
+  const startEditing = (p) => {
+    setEditingProvider(p);
+    setNavZone("items");
+    setFocusIndex(0);
   };
 
   const getFocusKey = useCallback(() => {
@@ -205,8 +232,15 @@ function App() {
     setSelectedItem(null);
     setIsPlaying(false);
     AVPlayer.stop();
-    setStatus("Loading...");
+    setStatus("Ready");
     setTmdbData(null);
+
+    if (sec === "Settings") {
+      setNavZone("items");
+      setFocusIndex(0);
+      setStatus("Settings Menu");
+      return;
+    }
 
     if (sec === "Favorites") {
       setItems(favorites);
@@ -216,10 +250,10 @@ function App() {
       return;
     }
 
-    if (sec === "Settings" || sec === "Search") {
+    if (sec === "Search") {
       setNavZone("items");
       setFocusIndex(0);
-      setStatus(sec === "Settings" ? "Application Settings" : "Search Content");
+      setStatus("Search Content");
       return;
     }
 
@@ -488,37 +522,89 @@ function App() {
 
         {/* Items */}
         <div className={`items-container ${section === "Live streams" || section === "Radio stations" ? "list-mode" : "grid-mode"}`}>
-          {section === "Settings" && (
+          {section === "Settings" && !editingProvider && (
              <div className="settings-panel" style={{width: '100%'}}>
                <div 
                  className={`item-card list-mode ${navZone === "items" && focusIndex === 0 ? "focused" : ""}`}
                  onClick={forceReload}
                >
                  <span className="row-title">Refresh Data (Clear Cache)</span>
-                 <div className="row-right">
-                   <ChevronRight size={24} />
-                 </div>
+                 <div className="row-right"><ChevronRight size={24} /></div>
                </div>
 
-               <h3 style={{margin: '40px 0 20px', color: '#666', textTransform: 'uppercase', fontSize: '18px'}}>Select Provider</h3>
+               <h3 style={{margin: '40px 0 20px', color: '#666', textTransform: 'uppercase', fontSize: '18px'}}>Portal Configuration</h3>
                {providers.map((p, i) => (
                  <div 
                    key={p.id}
                    className={`item-card list-mode ${p.active ? "active" : ""} ${navZone === "items" && focusIndex === (i + 1) ? "focused" : ""}`}
-                   onClick={() => selectProvider(p.id)}
+                   onClick={() => startEditing(p)}
                  >
-                   <span className="row-title">{p.name}</span>
+                   <span className="row-title">{p.name || `Provider ${i+1}`}</span>
                    <div className="row-right">
-                     {p.active && <div className="status-badge" style={{background: '#1688f0', color: 'white'}}>ACTIVE</div>}
+                     {p.active && <div className="status-badge" style={{background: '#1688f0', color: 'white', marginRight: '10px'}}>ACTIVE</div>}
+                     <span style={{fontSize: '14px', opacity: 0.5}}>Edit Details</span>
                      <ChevronRight size={24} />
                    </div>
                  </div>
                ))}
 
                <div className="status-badge info" style={{marginTop: '40px'}}>
-                 Version 1.3.0 - Multi-Provider Support
+                 Version 1.4.0 - Advanced Configuration Enabled
                </div>
              </div>
+          )}
+
+          {section === "Settings" && editingProvider && (
+            <div className="settings-panel" style={{width: '100%'}}>
+               <h3 style={{marginBottom: '20px'}}>Editing: {editingProvider.name}</h3>
+               
+               <div className="input-group" style={{display: 'flex', flexDirection: 'column', gap: '10px'}}>
+                  {[
+                    { label: "Name", key: "name" },
+                    { label: "Portal URL", key: "portal" },
+                    { label: "MAC Address", key: "mac" },
+                    { label: "Serial Number (SN)", key: "sn" },
+                    { label: "Device ID 1", key: "deviceId" },
+                    { label: "Device ID 2", key: "deviceId2" },
+                    { label: "Signature", key: "signature" }
+                  ].map((field, i) => (
+                    <div 
+                      key={field.key}
+                      className={`item-card list-mode ${navZone === "items" && focusIndex === i ? "focused" : ""}`}
+                      onClick={() => handleProviderInput(field.key, editingProvider[field.key])}
+                    >
+                      <span style={{width: '180px', fontSize: '16px', color: '#888'}}>{field.label}:</span>
+                      <span className="row-title" style={{fontSize: '18px'}}>{editingProvider[field.key] || "(Empty)"}</span>
+                    </div>
+                  ))}
+
+                  <div style={{display: 'flex', gap: '20px', marginTop: '30px'}}>
+                    <div 
+                      className={`item-card list-mode ${navZone === "items" && focusIndex === 7 ? "focused" : ""}`}
+                      style={{flex: 1, background: '#1688f0'}}
+                      onClick={() => saveProvider(editingProvider)}
+                    >
+                      <span className="row-title" style={{textAlign: 'center', color: 'white'}}>SAVE CONFIG</span>
+                    </div>
+                    <div 
+                      className={`item-card list-mode ${navZone === "items" && focusIndex === 8 ? "focused" : ""}`}
+                      style={{flex: 1, background: '#2ecc71'}}
+                      onClick={() => {
+                        saveProvider(editingProvider).then(() => selectProvider(editingProvider.id));
+                      }}
+                    >
+                      <span className="row-title" style={{textAlign: 'center', color: 'white'}}>ACTIVATE NOW</span>
+                    </div>
+                    <div 
+                      className={`item-card list-mode ${navZone === "items" && focusIndex === 9 ? "focused" : ""}`}
+                      style={{flex: 1, background: '#e74c3c'}}
+                      onClick={() => setEditingProvider(null)}
+                    >
+                      <span className="row-title" style={{textAlign: 'center', color: 'white'}}>CANCEL</span>
+                    </div>
+                  </div>
+               </div>
+            </div>
           )}
           
           {items.map((it, i) => {
