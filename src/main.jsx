@@ -316,6 +316,17 @@ function App() {
     if (!window.webapis || !window.webapis.avplay) return;
     stopAVPlay();
     try {
+webapis.avplay.setListener({
+  onbufferingstart: () => console.log("BUFFER START"),
+  onbufferingprogress: (p) => console.log("BUFFER", p),
+  onbufferingcomplete: () => console.log("BUFFER COMPLETE"),
+
+  onstreamcompleted: () => console.log("STREAM COMPLETED"),
+
+  onerror: (e) => console.log("AVPLAY ERROR", e),
+
+  onerrormsg: (e, msg) => console.log("AVPLAY ERROR MSG", e, msg)
+});
       window.webapis.avplay.open(url);
       setAvplayState("IDLE");
       
@@ -337,12 +348,16 @@ function App() {
           try { var st = window.webapis.avplay.getState(); if (st !== "PLAYING" && st !== "NONE") window.webapis.avplay.play(); } catch(e) {}
         },
         oncurrentplaytime: function(t) { if (!stateRef.current.isSeeking) setCurrentTime(t / 1000); },
-        onerror: function(e) { setStatus("Playback Error"); },
+        onerror: function(e) {
+  console.log("AVPLAY ERROR =", e);
+  setStatus("Playback Error " + e);
+},
         onstreamcompleted: function() { stopAVPlay(); setPlayUrl(""); setNavZone("items"); }
       };
       window.webapis.avplay.setListener(listener);
-      
-      window.webapis.avplay.prepareAsync(function() {
+      console.log("PLAY URL =", playUrl);
+      window.webapis.avplay.prepareAsync(
+function() {
         setAvplayState("READY");
         var curMode = stateRef.current.aspectRatio || "contain";
         if (curMode === "fill") window.webapis.avplay.setDisplayMethod("PLAYER_DISPLAY_MODE_FULL_SCREEN");
@@ -377,8 +392,14 @@ function App() {
         setActiveTrack({ audio: activeAud, text: activeSub });
         
         window.webapis.avplay.play();
-        setAvplayState("PLAYING");
-      });
+setAvplayState("PLAYING");
+
+},
+function(err) {
+  console.log("PREPARE FAILED =", err);
+  setStatus("Prepare Failed " + err);
+}
+);
     } catch (e) { setStatus("Init Error"); }
   }, [stopAVPlay]);
 
