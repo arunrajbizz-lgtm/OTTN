@@ -2,7 +2,7 @@ import React, { useEffect, useState, useRef, useCallback } from "react";
 import ReactDOM from "react-dom/client";
 import "./style.css";
 
-const BACKEND = "http://192.168.1.10:3001";
+const BACKEND = "";
 
 const MENU = ["Live streams", "Shows archive", "Media library", "Radio stations", "Settings"];
 
