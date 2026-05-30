@@ -443,7 +443,7 @@ function App() {
   }, [navZone, focusIndex, categories, items, section, selectedCat, favorites, loadSection, loadItems, playItem, isPlaying, toggleFavorite]);
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${isPlaying ? "video-playing" : ""}`}>
       {/* Sidebar */}
       <nav className={`sidebar ${navZone === "menu" ? "active-zone" : ""}`}>
         <div className="brand">
