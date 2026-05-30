@@ -1,18 +1,12 @@
 {
-  "name": "poomani-tv",
-  "private": true,
-  "version": "1.0.0",
+  "name": "ottn-backend",
+  "main": "server.js",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "preview": "vite preview"
+    "start": "node server.js"
   },
   "dependencies": {
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1"
-  },
-  "devDependencies": {
-    "vite": "^5.4.21",
-    "@vitejs/plugin-react": "^4.3.1"
+    "axios": "^1.7.0",
+    "cors": "^2.8.5",
+    "express": "^4.21.0"
   }
 }
