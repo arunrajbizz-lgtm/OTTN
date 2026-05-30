@@ -1,9 +1,18 @@
 {
-  "name": "poomani-tv-root",
-  "version": "1.0.0",
+  "name": "poomani-tv-frontend",
   "private": true,
+  "version": "1.0.0",
   "scripts": {
-    "build": "cd frontend && npm install && npm run build",
-    "install-all": "cd frontend && npm install && cd ../api && npm install"
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "vite": "^5.4.21",
+    "@vitejs/plugin-react": "^4.3.1"
   }
 }
