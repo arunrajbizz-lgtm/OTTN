@@ -303,10 +303,9 @@ app.get("/api/tmdb/search", async (req, res) => {
   } catch (e) { res.json({ ok: false, error: e.message }); }
 });
 
-module.exports = app;
+// Start server
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`Backend running on port ${PORT}`);
+});
 
-if (process.env.NODE_ENV !== "production") {
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Backend running on port ${PORT}`);
-  });
-}
+module.exports = app;
