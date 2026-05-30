@@ -1,10 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <widget xmlns="http://www.w3.org/ns/widgets" xmlns:tizen="http://tizen.org/ns/widgets" id="http://yourdomain/StalkerPortalTV" version="1.0.0" viewmodes="maximized">
   <tizen:application id="StalkerPortalTV.app" package="StalkerPortalTV" required_version="2.3"/>
+  <tizen:setting screen-orientation="landscape" context-menu="enable" background-support="disable" encryption="disable" />
   <content src="index.html"/>
   <feature name="http://tizen.org/feature/screen.size.all"/>
   <tizen:privilege name="http://tizen.org/privilege/internet"/>
   <tizen:privilege name="http://tizen.org/privilege/tv.inputdevice"/>
+  <tizen:privilege name="http://developer.samsung.com/privilege/avplay"/>
   <access origin="*" subdomains="true"/>
-  <name>Stalker Portal TV</name>
+  <name>POOMANI TV</name>
 </widget>
