@@ -2,10 +2,9 @@
   "name": "poomani-tv-root",
   "version": "1.0.0",
   "private": true,
-  "main": "frontend/dist/index.html",
   "scripts": {
     "build": "cd frontend && npm install && npm run build",
-    "start": "serve -s frontend/dist",
+    "start": "node api/index.js",
     "install-all": "npm install --prefix frontend && npm install --prefix api"
   }
 }
