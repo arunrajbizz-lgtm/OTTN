@@ -22,6 +22,8 @@ const USER_AGENT =
 
 let token = "";
 let randomValue = "";
+let lastAuth = 0;
+const AUTH_TTL = 10 * 60 * 1000;
 
 function getHeaders(useAuth = false) {
   const headers = {
@@ -144,10 +146,31 @@ function authFailed(data) {
 }
 
 async function ensureAuth() {
+
+  const now = Date.now();
+
+  if (
+    token &&
+    now - lastAuth < AUTH_TTL
+  ) {
+    return true;
+  }
+
   await doHandshake();
+
   const profile = await getProfile();
-  if (authFailed(profile)) throw new Error(profile?.js?.msg || profile?.js?.error || "Authorization failed");
-  return profile;
+
+  if (authFailed(profile)) {
+    throw new Error(
+      profile?.js?.msg ||
+      profile?.js?.error ||
+      "Authorization failed"
+    );
+  }
+
+  lastAuth = now;
+
+  return true;
 }
 
 
