@@ -505,34 +505,62 @@ function App() {
         <div className="player-wrapper">
           {overlayVisible && isPlaying && (
             <div className={`player-overlay visible ${navZone === "player" ? "active-zone" : ""}`}>
-              <div className="player-top">
-                <div className="player-title">
-                  <h2>{titleOf(selectedItem)}</h2>
-                  <span className="status-badge">{status}</span>
+              {/* STB Info Tile (Only for Live TV) */}
+              {section === "Live streams" && (
+                <div className="stb-info-tile">
+                  <div className="stb-main">
+                    <div className="stb-channel-box">
+                      <span className="stb-num">{selectedItem?.number || selectedItem?.num || "00"}</span>
+                      {thumbOf(selectedItem) && <img src={thumbOf(selectedItem)} alt="" className="stb-logo" />}
+                    </div>
+                    <div className="stb-content">
+                      <h2 className="stb-title">{titleOf(selectedItem)}</h2>
+                      <div className="stb-epg-info">
+                        <span className="stb-now">NOW:</span>
+                        <span className="stb-program">{selectedItem?.epg_progname || "No Program Information"}</span>
+                      </div>
+                    </div>
+                  </div>
+                  {/* Visual Progress Indicator for current program if possible, otherwise simple separator */}
+                  <div className="stb-progress-bar">
+                    <div className="stb-progress-fill" style={{width: '35%'}}></div> {/* Placeholder percentage */}
+                  </div>
                 </div>
-                <div className="player-meta">
-                   <Clock size={20} /> {new Date().toLocaleTimeString()}
-                </div>
-              </div>
+              )}
 
-              <div className="player-bottom">
-                <div className="time-info">
-                  <span>{formatTime(currentTime)}</span>
-                  <span>{formatTime(duration)}</span>
-                </div>
-                <div className="seek-bar-container">
-                  <div className="seek-bar-fill" style={{width: `${(currentTime / duration) * 100}%`}}></div>
-                </div>
-                
-                <div className="player-actions">
-                  <div className={`action-btn ${navZone === 'player' && focusIndex === 1 ? 'focused' : ''}`}><Rewind size={32}/><span className="action-label">-10s</span></div>
-                  <div className={`action-btn ${navZone === 'player' && focusIndex === 0 ? 'focused' : ''}`}>{isPaused ? <Play size={48}/> : <Pause size={48}/>}<span className="action-label">{isPaused ? "Play" : "Pause"}</span></div>
-                  <div className={`action-btn ${navZone === 'player' && focusIndex === 2 ? 'focused' : ''}`}><FastForward size={32}/><span className="action-label">+10s</span></div>
-                  <div className={`action-btn ${navZone === 'player' && focusIndex === 3 ? 'focused' : ''}`}><Maximize size={32}/><span className="action-label">{AVPlayer.aspectRatio}</span></div>
-                  <div className={`action-btn ${navZone === 'player' && focusIndex === 4 ? 'focused' : ''}`}><Volume2 size={32}/><span className="action-label">Audio</span></div>
-                  <div className={`action-btn ${navZone === 'player' && focusIndex === 5 ? 'focused' : ''}`}><Subtitles size={32}/><span className="action-label">CC</span></div>
-                </div>
-              </div>
+              {/* Original Player Overlay for VOD/Seekable content */}
+              {section !== "Live streams" && (
+                <>
+                  <div className="player-top">
+                    <div className="player-title">
+                      <h2>{titleOf(selectedItem)}</h2>
+                      <span className="status-badge">{status}</span>
+                    </div>
+                    <div className="player-meta">
+                       <Clock size={20} /> {new Date().toLocaleTimeString()}
+                    </div>
+                  </div>
+
+                  <div className="player-bottom">
+                    <div className="time-info">
+                      <span>{formatTime(currentTime)}</span>
+                      <span>{formatTime(duration)}</span>
+                    </div>
+                    <div className="seek-bar-container">
+                      <div className="seek-bar-fill" style={{width: `${(currentTime / duration) * 100}%`}}></div>
+                    </div>
+                    
+                    <div className="player-actions">
+                      <div className={`action-btn ${navZone === 'player' && focusIndex === 1 ? 'focused' : ''}`}><Rewind size={32}/><span className="action-label">-10s</span></div>
+                      <div className={`action-btn ${navZone === 'player' && focusIndex === 0 ? 'focused' : ''}`}>{isPaused ? <Play size={48}/> : <Pause size={48}/>}<span className="action-label">{isPaused ? "Play" : "Pause"}</span></div>
+                      <div className={`action-btn ${navZone === 'player' && focusIndex === 2 ? 'focused' : ''}`}><FastForward size={32}/><span className="action-label">+10s</span></div>
+                      <div className={`action-btn ${navZone === 'player' && focusIndex === 3 ? 'focused' : ''}`}><Maximize size={32}/><span className="action-label">{AVPlayer.aspectRatio}</span></div>
+                      <div className={`action-btn ${navZone === 'player' && focusIndex === 4 ? 'focused' : ''}`}><Volume2 size={32}/><span className="action-label">Audio</span></div>
+                      <div className={`action-btn ${navZone === 'player' && focusIndex === 5 ? 'focused' : ''}`}><Subtitles size={32}/><span className="action-label">CC</span></div>
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
           )}
           {!isPlaying && (
