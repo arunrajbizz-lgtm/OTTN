@@ -150,26 +150,12 @@ function extractUrl(data) {
 
 // Routes
 app.get("/", (req, res) => res.send(`POOMANI TV Active: ${p().name}`));
-app.get("/health", (req, res) => res.json({ status: "ok", active: p().name }));
-
-app.get("/api/test-portal", async (req, res) => {
-  try {
-    const r = await axios.get(p().portal, { timeout: 10000 });
-    res.json({ ok: true, status: r.status, provider: p().name, url: p().portal });
-  } catch (e) {
-    res.json({ ok: false, error: e.message, provider: p().name, url: p().portal });
-  }
-});
 
 app.get("/api/providers", (req, res) => {
-  console.log("[Route] GET /api/providers");
   try {
     const list = PROVIDERS.map((pr, i) => ({ ...pr, active: i === currentIdx }));
     res.json({ ok: true, providers: list });
-  } catch (e) {
-    console.error("[Route] providers error:", e.message);
-    res.json({ ok: false, error: e.message });
-  }
+  } catch (e) { res.json({ ok: false, error: e.message }); }
 });
 
 app.post("/api/update-provider", (req, res) => {
@@ -187,13 +173,6 @@ app.post("/api/select-provider", (req, res) => {
   currentIdx = idx;
   token = "";
   res.json({ ok: true, active: p().name });
-});
-
-app.get(["/api/connect", "/connect"], async (req, res) => {
-  try {
-    const profile = await ensureAuth();
-    res.json({ ok: true, token, profile, provider: p().name });
-  } catch (err) { res.json({ ok: false, error: err.message }); }
 });
 
 app.get("/api/live-categories", async (req, res) => {
@@ -241,11 +220,12 @@ app.get("/api/vod-list", async (req, res) => {
   } catch (err) { res.json({ ok: false, error: err.message }); }
 });
 
-app.get("/api/radio", async (req, res) => {
+app.get("/api/series-info", async (req, res) => {
   try {
     await ensureAuth();
-    const data = await stalkerRequest({ type: "radio", action: "get_categories", JsHttpRequest: "1-xml" }, true);
-    res.json({ ok: true, data: normalizeArray(data) });
+    const movie_id = req.query.id;
+    const data = await stalkerRequest({ type: "vod", action: "get_info", movie_id, JsHttpRequest: "1-xml" }, true);
+    res.json({ ok: true, data });
   } catch (err) { res.json({ ok: false, error: err.message }); }
 });
 
@@ -286,17 +266,6 @@ app.get("/api/search", async (req, res) => {
     const results = [...normalizeArray(live), ...normalizeArray(vod)];
     res.json({ ok: true, data: results });
   } catch (err) { res.json({ ok: false, error: err.message }); }
-});
-
-app.get("/api/tmdb/search", async (req, res) => {
-  try {
-    const title = req.query.title;
-    if (!title || !TMDB_API_KEY) return res.json({ ok: false });
-    const response = await axios.get("https://api.themoviedb.org/3/search/movie", { params: { api_key: TMDB_API_KEY, query: title } });
-    const movie = response.data.results?.[0];
-    if (!movie) return res.json({ ok: false });
-    res.json({ ok: true, title: movie.title, overview: movie.overview, rating: movie.vote_average, poster: movie.poster_path ? `https://image.tmdb.org/t/p/w500${movie.poster_path}` : "" });
-  } catch (e) { res.json({ ok: false }); }
 });
 
 app.listen(PORT, "0.0.0.0", () => {
