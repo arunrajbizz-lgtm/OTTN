@@ -31,7 +31,7 @@ let PROVIDERS = [
   }
 ];
 
-let currentIdx = 0;
+let currentIdx = 1; // Default to TataSky
 let token = "";
 let randomValue = "";
 
@@ -111,50 +111,6 @@ function normalizeArray(data) {
   return [];
 }
 
-/**
- * Universal Series Logic
- */
-function parseSeriesData(raw) {
-  console.log("SERIES RAW", JSON.stringify(raw, null, 2));
-  const js = raw?.js || raw;
-  const seasonsMap = {};
-
-  const findItems = (obj) => {
-    if (!obj || typeof obj !== 'object') return;
-    if (obj.cmd && (obj.name || obj.title)) {
-      const sId = obj.season_id || obj.season_number || "1";
-      if (!seasonsMap[sId]) seasonsMap[sId] = [];
-      seasonsMap[sId].push({
-        episode_id: obj.id || obj.episode_id || Math.random().toString(36).substr(2, 5),
-        title: obj.name || obj.title,
-        cmd: obj.cmd
-      });
-      return;
-    }
-    for (let k in obj) {
-      if (Array.isArray(obj[k])) obj[k].forEach(findItems);
-      else if (typeof obj[k] === 'object') findItems(obj[k]);
-    }
-  };
-
-  findItems(js);
-
-  const seasons = Object.keys(seasonsMap).sort().map(sId => {
-    console.log(`SEASONS: ID ${sId}`);
-    console.log(`EPISODES:`, seasonsMap[sId]);
-    return {
-      season_id: sId,
-      episodes: seasonsMap[sId]
-    };
-  });
-
-  return {
-    id: js.id || js.movie_id,
-    title: js.name || js.title,
-    seasons: seasons
-  };
-}
-
 // Routes
 app.get("/api/connect", async (req, res) => {
   try { await ensureAuth(); res.json({ ok: true, token, provider: p().name }); } 
@@ -173,18 +129,29 @@ app.get("/api/vod-list", async (req, res) => {
   } catch (err) { res.json({ ok: false, error: err.message }); }
 });
 
-app.get("/api/series-info", async (req, res) => {
+app.get("/api/series-debug", async (req, res) => {
   try {
     await ensureAuth();
     const id = req.query.id;
-    const data = await stalkerRequest({ type: "vod", action: "get_info", movie_id: id, JsHttpRequest: "1-xml" }, true);
-    
-    console.log("SERIES_RAW", JSON.stringify(data, null, 2));
+    const results = {};
 
-    res.json({ 
-      ok: true, 
-      raw: data 
-    });
+    // 1. movie_id only
+    results.movie_id_only = await stalkerRequest({ type: "vod", action: "get_ordered_list", movie_id: id, JsHttpRequest: "1-xml" }, true);
+    console.log("SERIES DEBUG (movie_id_only)", JSON.stringify(results.movie_id_only, null, 2));
+
+    // 2. category only (trying to see if ID works as category)
+    results.category_only = await stalkerRequest({ type: "vod", action: "get_ordered_list", category: id, JsHttpRequest: "1-xml" }, true);
+    console.log("SERIES DEBUG (category_only)", JSON.stringify(results.category_only, null, 2));
+
+    // 3. movie_id + season_id=0
+    results.movie_plus_season0 = await stalkerRequest({ type: "vod", action: "get_ordered_list", movie_id: id, season_id: "0", JsHttpRequest: "1-xml" }, true);
+    console.log("SERIES DEBUG (movie_plus_season0)", JSON.stringify(results.movie_plus_season0, null, 2));
+
+    // 4. movie_id + episode_id=0
+    results.movie_plus_episode0 = await stalkerRequest({ type: "vod", action: "get_ordered_list", movie_id: id, episode_id: "0", JsHttpRequest: "1-xml" }, true);
+    console.log("SERIES DEBUG (movie_plus_episode0)", JSON.stringify(results.movie_plus_episode0, null, 2));
+
+    res.json({ ok: true, results });
   } catch (err) { res.json({ ok: false, error: err.message }); }
 });
 
@@ -196,7 +163,11 @@ app.get("/api/create-link", async (req, res) => {
     if (movie_id) params.movie_id = movie_id;
     if (season_id) params.season_id = season_id;
     if (episode_id) params.episode_id = episode_id;
+    
+    console.log("CREATE_LINK_PARAMS", params);
     const data = await stalkerRequest(params, true);
+    console.log("CREATE_LINK_RESPONSE", JSON.stringify(data, null, 2));
+
     const js = data?.js || {};
     let url = js.cmd || js.url || data.cmd || data.url || "";
     res.json({ ok: !!url, url: String(url).replace(/^(ffmpeg|ffrt|mpv|auto)\s+/i, "").trim(), raw: data });
