@@ -93,6 +93,19 @@ function App() {
   const [navZone, setNavZone] = useState("menu");
   const [focusIndex, setFocusIndex] = useState(0);
 
+  // Focus Memory
+  const zoneIndices = useRef({ menu: 0, categories: 0, items: 0, seasons: 0, episodes: 0, player: 0 });
+
+  const updateFocus = useCallback((zone, idx) => {
+    zoneIndices.current[zone] = idx;
+    if (navZone === zone) setFocusIndex(idx);
+  }, [navZone]);
+
+  const switchZone = useCallback((newZone) => {
+    setNavZone(newZone);
+    setFocusIndex(zoneIndices.current[newZone] || 0);
+  }, []);
+
   const api = useCallback(async (p, method = "GET", body = null) => {
     try {
       const r = await fetch(BACKEND + p, {
@@ -106,16 +119,17 @@ function App() {
 
   const loadSection = useCallback(async (sec) => {
     setSection(sec); setCategories([]); setItems([]); setSelectedCat(null); setSelectedItem(null);
-    setIsPlaying(false); setSeriesData(null); AVPlayer.stop(); setFocusIndex(0);
+    setIsPlaying(false); setSeriesData(null); AVPlayer.stop();
     
     if (sec === "Settings") { 
-      setNavZone("items"); setFocusIndex(0); 
+      switchZone("items");
+      updateFocus("items", 0);
       api("/api/providers").then(j => { if(j.ok) setProviders(j.providers || []); });
       return; 
     }
-    if (sec === "Favorites") { setItems(favorites); setNavZone("items"); return; }
+    if (sec === "Favorites") { setItems(favorites); switchZone("items"); updateFocus("items", 0); return; }
     if (sec === "Search") { 
-      setNavZone("items"); 
+      switchZone("items"); updateFocus("items", 0);
       const query = prompt("Search for content...");
       if (query) {
         setStatus(`Searching for "${query}"...`);
@@ -130,7 +144,12 @@ function App() {
     }
 
     const cached = Cache.get(sec);
-    if (cached) { setCategories(cached); setNavZone("categories"); setStatus("Ready (Cached)"); return; }
+    if (cached) {
+      setCategories(cached);
+      switchZone("categories");
+      setStatus("Ready (Cached)");
+      return;
+    }
 
     setStatus(`Loading ${sec}...`);
     let path = sec === "Shows archive" ? "/api/archive-categories" : 
@@ -141,10 +160,10 @@ function App() {
     if (j.ok) {
       setCategories(j.data || []);
       Cache.set(sec, j.data || []);
-      setNavZone("categories");
+      switchZone("categories");
       setStatus("Ready");
     } else { setStatus("Portal Error"); }
-  }, [favorites, api]);
+  }, [favorites, api, switchZone, updateFocus]);
 
   const loadItems = useCallback(async (cat) => {
     if (!cat) return;
@@ -152,7 +171,11 @@ function App() {
     const id = idOf(cat);
     const cKey = `${section}_${id}`;
     const cached = Cache.get(cKey);
-    if (cached) { setItems(cached); setNavZone("items"); setFocusIndex(0); return; }
+    if (cached) { 
+      setItems(cached); 
+      switchZone("items");
+      return; 
+    }
 
     let path = section === "Shows archive" ? `/api/archive-list?genre=${encodeURIComponent(id)}` :
                section === "Media library" ? `/api/vod-list?category=${encodeURIComponent(id)}` :
@@ -163,11 +186,10 @@ function App() {
     if (j.ok) {
       setItems(j.data || []);
       Cache.set(cKey, j.data || []);
-      setNavZone("items");
-      setFocusIndex(0);
+      switchZone("items");
       setStatus("Ready");
     }
-  }, [section, api]);
+  }, [section, api, switchZone]);
 
   const openSeries = useCallback(async (item) => {
     setStatus("Loading Series Info...");
@@ -179,12 +201,12 @@ function App() {
         });
       }
       setSeriesData({ ...j, originalItem: item });
-      setNavZone("seasons");
-      setFocusIndex(0);
+      switchZone("seasons");
+      updateFocus("seasons", 0);
       setActiveSeasonIdx(0);
       setStatus("Series Ready");
     } else { setStatus("Error loading series"); }
-  }, [api]);
+  }, [api, switchZone, updateFocus]);
 
   const playItem = useCallback(async (item) => {
     if (!item) return;
@@ -194,10 +216,11 @@ function App() {
     const j = await api(`/api/create-link?type=${type}&cmd=${encodeURIComponent(cmdOf(item))}`);
     if (j.ok && j.url) {
       setIsPlaying(true); setIsPaused(false); setOverlay(true);
-      setNavZone("player"); setFocusIndex(0);
+      switchZone("player");
+      updateFocus("player", 0);
       AVPlayer.play(j.url, setStatus, (c, d) => setProgress({ current: c, duration: d }));
     } else { setStatus("Stream Error"); }
-  }, [section, api]);
+  }, [section, api, switchZone, updateFocus]);
 
   const playEpisode = useCallback(async (episode) => {
     setSelectedItem(episode);
@@ -206,10 +229,11 @@ function App() {
     const j = await api(`/api/episode-link?series_id=${seriesData.id}&season_id=${season.id}&episode_id=${episode.id}`);
     if (j.ok && j.url) {
       setIsPlaying(true); setIsPaused(false); setOverlay(true);
-      setNavZone("player"); setFocusIndex(0);
+      switchZone("player");
+      updateFocus("player", 0);
       AVPlayer.play(j.url, setStatus, (c, d) => setProgress({ current: c, duration: d }));
     } else { setStatus("Episode Stream Error"); }
-  }, [api, seriesData, activeSeasonIdx]);
+  }, [api, seriesData, activeSeasonIdx, switchZone, updateFocus]);
 
   const toggleFavorite = useCallback((item) => {
     if (!item) return;
@@ -241,27 +265,27 @@ function App() {
       if (key === 10009 || key === 27) { // Return / ESC
         if (isPlaying) { 
            AVPlayer.stop(); setIsPlaying(false); 
-           setNavZone(seriesData ? "episodes" : "items"); 
+           switchZone(seriesData ? "episodes" : "items"); 
            return; 
         }
-        if (editingProvider) { setEditingProvider(null); setFocusIndex(0); return; }
+        if (editingProvider) { setEditingProvider(null); updateFocus("items", 0); return; }
         if (seriesData) {
-          if (navZone === "episodes") { setNavZone("seasons"); setFocusIndex(activeSeasonIdx); return; }
-          setSeriesData(null); setNavZone("items"); setFocusIndex(0); return;
+          if (navZone === "episodes") { switchZone("seasons"); return; }
+          setSeriesData(null); switchZone("items"); return;
         }
         if (navZone === "items") { 
           if (["Settings", "Favorites", "Search"].includes(section)) {
-            setNavZone("menu"); setFocusIndex(MENU.findIndex(m => m.id === section));
-          } else { setNavZone("categories"); setFocusIndex(0); }
+            switchZone("menu");
+          } else { switchZone("categories"); }
           return;
         }
-        if (navZone === "categories") { setNavZone("menu"); setFocusIndex(MENU.findIndex(m => m.id === section)); return; }
+        if (navZone === "categories") { switchZone("menu"); return; }
         return;
       }
 
       switch(key) {
         case 415: case 19: case 10252: if (isPlaying) { isPaused ? AVPlayer.resume() : AVPlayer.pause(); setIsPaused(!isPaused); } break;
-        case 413: if (isPlaying) { AVPlayer.stop(); setIsPlaying(false); setNavZone(seriesData ? "episodes" : "items"); } break;
+        case 413: if (isPlaying) { AVPlayer.stop(); setIsPlaying(false); switchZone(seriesData ? "episodes" : "items"); } break;
         case 412: if (isPlaying) AVPlayer.seek(-30000); break;
         case 417: if (isPlaying) AVPlayer.seek(30000); break;
         case 31: setOverlay(true); break; 
@@ -277,25 +301,25 @@ function App() {
                 navZone === "episodes" ? seriesData?.seasons[activeSeasonIdx]?.episodes?.length || 0 : 0;
 
       switch(key) {
-        case 38: setFocusIndex(p => Math.max(0, p - 1)); break; // Up
-        case 40: setFocusIndex(p => Math.min(max - 1, p + 1)); break; // Down
+        case 38: setFocusIndex(p => { const n = Math.max(0, p - 1); zoneIndices.current[navZone] = n; return n; }); break; // Up
+        case 40: setFocusIndex(p => { const n = Math.min(max - 1, p + 1); zoneIndices.current[navZone] = n; return n; }); break; // Down
         case 37: // Left
-          if (navZone === "episodes") { setNavZone("seasons"); setFocusIndex(activeSeasonIdx); }
-          else if (navZone === "seasons") { setSeriesData(null); setNavZone("items"); }
+          if (navZone === "episodes") switchZone("seasons");
+          else if (navZone === "seasons") { setSeriesData(null); switchZone("items"); }
           else if (navZone === "items") { 
-            if (["Settings", "Favorites", "Search"].includes(section)) { setNavZone("menu"); setFocusIndex(MENU.findIndex(m => m.id === section)); }
-            else { setNavZone("categories"); setFocusIndex(0); }
+            if (["Settings", "Favorites", "Search"].includes(section)) switchZone("menu");
+            else switchZone("categories");
           }
-          else if (navZone === "categories" || navZone === "player") { setNavZone("menu"); setFocusIndex(MENU.findIndex(m => m.id === section)); }
+          else if (navZone === "categories" || navZone === "player") switchZone("menu");
           break;
         case 39: // Right
           if (navZone === "menu") { 
-            if (["Settings", "Favorites", "Search"].includes(section)) { setNavZone("items"); setFocusIndex(0); }
-            else if (categories?.length > 0) { setNavZone("categories"); setFocusIndex(0); }
+            if (["Settings", "Favorites", "Search"].includes(section)) switchZone("items");
+            else if (categories?.length > 0) switchZone("categories");
           }
-          else if (navZone === "categories" && items?.length > 0) { setNavZone("items"); setFocusIndex(0); }
-          else if (navZone === "items" && isPlaying) { setNavZone("player"); setFocusIndex(0); }
-          else if (navZone === "seasons") { setNavZone("episodes"); setFocusIndex(0); }
+          else if (navZone === "categories" && items?.length > 0) switchZone("items");
+          else if (navZone === "items" && isPlaying) switchZone("player");
+          else if (navZone === "seasons") switchZone("episodes");
           break;
         case 13: // Enter
           if (navZone === "menu") loadSection(MENU[focusIndex].id);
@@ -308,7 +332,7 @@ function App() {
             if (it.is_series == "1" || it.is_series === true) { openSeries(it); }
             else playItem(it);
           } else if (navZone === "seasons") {
-            setActiveSeasonIdx(focusIndex); setNavZone("episodes"); setFocusIndex(0);
+            setActiveSeasonIdx(focusIndex); switchZone("episodes");
           } else if (navZone === "episodes") {
             playEpisode(seriesData.seasons[activeSeasonIdx].episodes[focusIndex]);
           } else if (navZone === "player") {
@@ -322,7 +346,7 @@ function App() {
     };
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
-  }, [navZone, focusIndex, categories, items, section, isPlaying, overlay, editingProvider, providers, isPaused, showOverlay, loadSection, loadItems, playItem, seriesData, activeSeasonIdx, openSeries, playEpisode, toggleFavorite, api]);
+  }, [navZone, focusIndex, categories, items, section, isPlaying, overlay, editingProvider, providers, isPaused, showOverlay, loadSection, loadItems, playItem, seriesData, activeSeasonIdx, openSeries, playEpisode, toggleFavorite, api, switchZone, updateFocus]);
 
   useEffect(() => {
     const focused = document.querySelector('.focused');

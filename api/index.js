@@ -5,8 +5,14 @@ const cors = require("cors");
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+const path = require("path");
+
 app.use(cors({ origin: "*" }));
 app.use(express.json());
+
+// Serve Static Frontend Files
+const distPath = path.join(__dirname, "../frontend/dist");
+app.use(express.static(distPath));
 
 let PROVIDERS = [
   {
@@ -146,14 +152,18 @@ app.get("/api/media-library", async (req, res) => {
       data = normalizeArray(raw);
     }
 
-    // Strategy 3: Manual scan if still empty (Ultra fallback)
+    // Strategy 3: get_ordered_list with category=0 (Special discovery)
     if (data.length === 0) {
-      console.warn("[VOD] Strategy 2 failed, attempting Strategy 3 (Manual List Scan)");
-      raw = await stalkerRequest({ type: "vod", action: "get_ordered_list", JsHttpRequest: "1-xml" }, true);
-      const items = normalizeArray(raw);
-      const uniqueCats = new Set();
-      items.forEach(it => { if(it.category_id) uniqueCats.add(it.category_id); });
-      data = Array.from(uniqueCats).map(id => ({ id, title: `Category ${id}`, category_id: id }));
+        console.warn("[VOD] Strategy 2 failed, trying get_ordered_list discovery");
+        raw = await stalkerRequest({ type: "vod", action: "get_ordered_list", JsHttpRequest: "1-xml" }, true);
+        const items = normalizeArray(raw);
+        const cats = {};
+        items.forEach(it => {
+            if (it.category_id && it.category_id !== "0") {
+                cats[it.category_id] = it.category_name || `Category ${it.category_id}`;
+            }
+        });
+        data = Object.keys(cats).map(id => ({ id, title: cats[id], category_id: id }));
     }
 
     res.json({ ok: true, data });
@@ -215,7 +225,24 @@ app.get("/api/episode-link", async (req, res) => {
   } catch (err) { res.json({ ok: false, error: err.message }); }
 });
 
-app.get("/api/live-categories", async (req, res) => {
+app.get("/api/radio", async (req, res) => {
+  try {
+    await ensureAuth();
+    const raw = await stalkerRequest({ type: "radio", action: "get_categories", JsHttpRequest: "1-xml" }, true);
+    res.json({ ok: true, data: normalizeArray(raw) });
+  } catch (err) { res.json({ ok: false, error: err.message }); }
+});
+
+app.get("/api/radio-list", async (req, res) => {
+  try {
+    await ensureAuth();
+    const genre = req.query.genre || "*";
+    const raw = await stalkerRequest({ type: "radio", action: "get_ordered_list", genre, JsHttpRequest: "1-xml" }, true);
+    res.json({ ok: true, data: normalizeArray(raw) });
+  } catch (err) { res.json({ ok: false, error: err.message }); }
+});
+
+app.get("/api/archive-categories", async (req, res) => {
   try {
     await ensureAuth();
     const raw = await stalkerRequest({ type: "itv", action: "get_genres", JsHttpRequest: "1-xml" }, true);
@@ -223,11 +250,26 @@ app.get("/api/live-categories", async (req, res) => {
   } catch (err) { res.json({ ok: false, error: err.message }); }
 });
 
+app.get("/api/archive-list", async (req, res) => {
+  try {
+    await ensureAuth();
+    const genre = req.query.genre || "*";
+    const raw = await stalkerRequest({ type: "itv", action: "get_ordered_list", genre, JsHttpRequest: "1-xml" }, true);
+    res.json({ ok: true, data: normalizeArray(raw) });
+  } catch (err) { res.json({ ok: false, error: err.message }); }
+});
+
 app.get("/api/live-channels", async (req, res) => {
   try {
     await ensureAuth();
-    const raw = await stalkerRequest({ type: "itv", action: "get_ordered_list", genre: req.query.genre || "*", JsHttpRequest: "1-xml" }, true);
-    res.json({ ok: true, data: normalizeArray(raw) });
+    const genre = req.query.genre || "*";
+    let raw = await stalkerRequest({ type: "itv", action: "get_ordered_list", genre, p: "1", num: "1000", JsHttpRequest: "1-xml" }, true);
+    let data = normalizeArray(raw);
+    if (data.length === 0 && genre === "*") {
+        raw = await stalkerRequest({ type: "itv", action: "get_all_channels", JsHttpRequest: "1-xml" }, true);
+        data = normalizeArray(raw);
+    }
+    res.json({ ok: true, data });
   } catch (err) { res.json({ ok: false, error: err.message }); }
 });
 
@@ -251,6 +293,11 @@ app.get("/api/search", async (req, res) => {
     ]);
     res.json({ ok: true, data: [...normalizeArray(live), ...normalizeArray(vod)] });
   } catch (err) { res.json({ ok: false, error: err.message }); }
+});
+
+// Catch-all to serve index.html for SPA
+app.get("*", (req, res) => {
+  res.sendFile(path.join(distPath, "index.html"));
 });
 
 app.listen(PORT, "0.0.0.0", () => console.log(`Backend on ${PORT}`));
