@@ -276,12 +276,13 @@ app.get("/api/series-debug", async (req, res) => {
     await ensureAuth();
     const id = req.query.id;
     
-    const [test1, test2, test3, test4, test5] = await Promise.all([
+    const [test1, test2, test3, test4, test5, test6] = await Promise.all([
       stalkerRequest({ type: "vod", action: "get_info", movie_id: id, JsHttpRequest: "1-xml" }, true),
       stalkerRequest({ type: "vod", action: "get_ordered_list", movie_id: id, JsHttpRequest: "1-xml" }, true),
       stalkerRequest({ type: "vod", action: "get_ordered_list", category: id, JsHttpRequest: "1-xml" }, true),
       stalkerRequest({ type: "vod", action: "get_info", movie_id: id, season_id: "0", JsHttpRequest: "1-xml" }, true),
-      stalkerRequest({ type: "vod", action: "create_link", cmd: `/media/${id}.mpg`, JsHttpRequest: "1-xml" }, true)
+      stalkerRequest({ type: "vod", action: "create_link", cmd: `/media/${id}.mpg`, JsHttpRequest: "1-xml" }, true),
+      stalkerRequest({ type: "vod", action: "get_ordered_list", movie_id: id, season_id: "14063", JsHttpRequest: "1-xml" }, true)
     ]);
 
     res.json({ 
@@ -290,7 +291,8 @@ app.get("/api/series-debug", async (req, res) => {
       test2, 
       test3, 
       test4, 
-      test5 
+      test5,
+      test6
     });
   } catch (err) { res.json({ ok: false, error: err.message }); }
 });
