@@ -133,10 +133,20 @@ async function getProfile() {
   return data;
 }
 
+let isAuthenticating = false;
+let authPromise = null;
+
 async function ensureAuth() {
   if (token) return; 
+  if (isAuthenticating) return authPromise;
+
   console.log(`[Auth] No token found, initiating full auth flow for ${p().name}`);
-  return await getProfile();
+  isAuthenticating = true;
+  authPromise = getProfile().finally(() => {
+    isAuthenticating = false;
+    authPromise = null;
+  });
+  return authPromise;
 }
 
 function normalizeArray(data) {
@@ -159,6 +169,16 @@ app.use((req, res, next) => {
 });
 
 // Routes
+app.get("/api/status", (req, res) => {
+  res.json({ 
+    ok: true, 
+    provider: p().name, 
+    hasToken: !!token, 
+    timestamp: new Date().toISOString(),
+    currentIdx
+  });
+});
+
 app.get("/api/providers", (req, res) => {
   res.json({ ok: true, providers: PROVIDERS, currentIdx });
 });
