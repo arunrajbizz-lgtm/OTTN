@@ -265,6 +265,11 @@ function App() {
       const key = e.keyCode || e.which;
       showOverlay();
 
+      // Prevent default behavior for navigation keys to ensure app handles them
+      if ([37, 38, 39, 40, 13, 10009, 27].includes(key)) {
+        e.preventDefault();
+      }
+
       if (key === 10009 || key === 27) { // Return / ESC
         if (isPlaying) { 
            AVPlayer.stop(); setIsPlaying(false); 
