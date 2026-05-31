@@ -25,7 +25,7 @@ const MENU = [
   { id: "Radio stations", icon: Radio, label: "Radio" },
   { id: "Favorites", icon: Heart, label: "My List" },
   { id: "Search", icon: Search, label: "Search" },
-  { id: "Settings", icon: Settings, label: "Settings" }
+  { id: "Settings", icon: SettingsIcon, label: "Settings" }
 ];
 
 const titleOf = (x) => x?.title || x?.name || x?.o_name || x?.fname || x?.tv_genre_name || x?.category_name || x?.genre_title || "No name";
@@ -607,7 +607,7 @@ function App() {
             </div>
           )}
           
-          {items.map((it, i) => {
+          {(items || []).map((it, i) => {
             const isFav = favorites.some(f => idOf(f) === idOf(it));
             return (
               <div key={i} className={`item-card ${selectedItem === it ? "active" : ""} ${navZone === "items" && focusIndex === i ? "focused" : ""}`}>
@@ -638,4 +638,4 @@ function App() {
   );
 }
 
-ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);getElementById("root")).render(<App />);d("root")).render(<App />);

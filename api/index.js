@@ -45,7 +45,14 @@ function p() { return PROVIDERS[currentIdx]; }
 const saveProviders = () => { /* In a real app, write to disk/db. Here we keep in memory */ };
 
 app.get("/api/providers", (req, res) => {
-  res.json({ ok: true, providers: PROVIDERS.map((pr, i) => ({ ...pr, active: i === currentIdx })) });
+  console.log("[Route] GET /api/providers");
+  try {
+    const list = PROVIDERS.map((pr, i) => ({ ...pr, active: i === currentIdx }));
+    res.json({ ok: true, providers: list });
+  } catch (e) {
+    console.error("[Route] providers error:", e.message);
+    res.json({ ok: false, error: e.message });
+  }
 });
 
 app.post("/api/update-provider", (req, res) => {

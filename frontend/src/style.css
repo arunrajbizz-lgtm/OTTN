@@ -228,8 +228,7 @@ html, body, #root {
 .app-shell.video-playing .sidebar,
 .app-shell.video-playing .cat-panel,
 .app-shell.video-playing .content-area {
-  background: rgba(0, 0, 0, 0.4) !important; /* Semi-transparent overlay */
-  backdrop-filter: blur(5px);
+  background: rgba(0, 0, 0, 0.7) !important; /* Slightly darker instead of blur */
 }
 
 .app-shell.video-playing .player-empty {
