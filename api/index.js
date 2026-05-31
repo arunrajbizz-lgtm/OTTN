@@ -209,8 +209,19 @@ app.get("/api/live-categories", async (req, res) => {
 app.get("/api/media-library", async (req, res) => {
   try {
     await ensureAuth();
-    const data = await stalkerRequest({ type: "vod", action: "get_categories", JsHttpRequest: "1-xml" }, true);
-    res.json({ ok: true, data: normalizeArray(data) });
+    // Try Strategy 1: get_categories
+    let data = await stalkerRequest({ type: "vod", action: "get_categories", JsHttpRequest: "1-xml" }, true);
+    let normalized = normalizeArray(data);
+
+    // Strategy 2: Fallback to get_genres if categories are empty or js:false
+    if (normalized.length === 0) {
+        console.warn(`[VOD] get_categories failed for ${p().name}, trying get_genres...`);
+        data = await stalkerRequest({ type: "vod", action: "get_genres", JsHttpRequest: "1-xml" }, true);
+        normalized = normalizeArray(data);
+    }
+
+    console.log(`[VOD] Categories discovered: ${normalized.length}`);
+    res.json({ ok: true, data: normalized });
   } catch (err) { res.json({ ok: false, error: err.message }); }
 });
 
