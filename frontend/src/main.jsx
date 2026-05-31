@@ -114,7 +114,10 @@ function App() {
         body: body ? JSON.stringify(body) : null
       });
       return await r.json();
-    } catch(e) { return { ok: false, error: e.message }; }
+    } catch(e) { 
+      console.error("Fetch Error:", e);
+      return { ok: false, error: "Network Error: Failed to connect to backend. Check if server is running and CORS is allowed." }; 
+    }
   }, []);
 
   const loadSection = useCallback(async (sec) => {

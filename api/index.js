@@ -7,8 +7,11 @@ const PORT = process.env.PORT || 3001;
 
 const path = require("path");
 
-app.use(cors({ origin: "*" }));
+app.use(cors());
 app.use(express.json());
+
+// Test Endpoint
+app.get("/api/test", (req, res) => res.json({ ok: true, message: "Backend is reachable" }));
 
 // Serve Static Frontend Files
 const distPath = path.join(__dirname, "../frontend/dist");
