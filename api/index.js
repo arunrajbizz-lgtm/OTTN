@@ -232,17 +232,31 @@ app.get("/api/create-link", async (req, res) => {
     const type = req.query.type || "itv";
     const data = await stalkerRequest({ type, action: "create_link", cmd, JsHttpRequest: "1-xml" }, true);
     
-    console.log("CREATE LINK RAW", JSON.stringify(data, null, 2));
+    console.log("CREATE_LINK_RESPONSE", JSON.stringify(data, null, 2));
 
-    const playUrl = extractUrl(data);
+    const js = data?.js || {};
+    let rawCmd = js.cmd || js.url || js.stream_url || js.ffmpeg_cmd || data.cmd || data.url || data.results || "";
     
-    if (!playUrl || playUrl.startsWith("?")) {
-        console.error("INVALID PLAY URL EXTRACTED:", playUrl);
-        return res.json({ ok: false, url: "", error: "Invalid link format from portal" });
-    }
+    if (typeof data?.js === "string") rawCmd = data.js;
+    
+    const playUrl = String(rawCmd).trim().replace(/^(ffmpeg|ffrt|mpv|auto)\s+/i, "").trim();
 
-    res.json({ ok: true, url: playUrl });
+    res.json({ 
+        ok: true, 
+        url: playUrl, 
+        raw: data 
+    });
   } catch (err) { res.json({ ok: false, error: err.message }); }
+});
+
+app.get("/api/create-link-debug", async (req, res) => {
+  try {
+    await ensureAuth();
+    const cmd = req.query.cmd || "";
+    const type = req.query.type || "itv";
+    const data = await stalkerRequest({ type, action: "create_link", cmd, JsHttpRequest: "1-xml" }, true);
+    res.json(data);
+  } catch (err) { res.json({ error: err.message }); }
 });
 
 app.get("/api/search", async (req, res) => {
