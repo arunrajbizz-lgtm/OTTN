@@ -7,7 +7,7 @@ import {
 } from "lucide-react";
 import "./style.css";
 
-const BACKEND = ""; // Production relative path
+const BACKEND = ""; // Relative for production
 
 const MENU = [
   { id: "Live streams", icon: Tv, label: "Live streams" },
@@ -81,11 +81,9 @@ function App() {
     try { return JSON.parse(localStorage.getItem("favs") || "[]"); } catch(e){ return []; }
   });
 
-  // OTT Navigator Style Series State
-  const [activeSeries, setActiveSeries] = useState(null); // The parent series object
-  const [seasons, setSeasons] = useState([]);
-  const [episodes, setEpisodes] = useState([]);
-  const [activeSeason, setActiveSeason] = useState(null);
+  // Series UI State
+  const [seriesMetadata, setSeriesMetadata] = useState(null);
+  const [activeSeasonIdx, setActiveSeasonIdx] = useState(0);
 
   const [overlay, setOverlay] = useState(false);
   const [progress, setProgress] = useState({ current: 0, duration: 0 });
@@ -108,8 +106,7 @@ function App() {
 
   const loadSection = useCallback(async (sec) => {
     setSection(sec); setCategories([]); setItems([]); setSelectedCat(null); setSelectedItem(null);
-    setIsPlaying(false); setActiveSeries(null); setSeasons([]); setEpisodes([]); setActiveSeason(null);
-    AVPlayer.stop(); setFocusIndex(0);
+    setIsPlaying(false); setSeriesMetadata(null); AVPlayer.stop(); setFocusIndex(0);
     
     if (sec === "Settings") { setNavZone("items"); api("/api/providers").then(j => { if(j.ok) setProviders(j.providers || []); }); return; }
     if (sec === "Favorites") { setItems(favorites); setNavZone("items"); return; }
@@ -141,30 +138,17 @@ function App() {
     if (j.ok) { setItems(j.data || []); setNavZone("items"); setFocusIndex(0); setStatus("Ready"); }
   }, [section, api]);
 
-  // OTT Navigator Style Series Navigation
   const openSeries = useCallback(async (item) => {
-    setStatus("Loading Seasons...");
-    setActiveSeries(item);
-    const j = await api(`/api/vod-list?movie_id=${item.id}`);
+    setStatus("Opening Series...");
+    const j = await api(`/api/series-info?id=${item.id}`);
     if (j.ok) {
-      setSeasons(j.data || []);
+      setSeriesMetadata(j);
       setNavZone("seasons");
       setFocusIndex(0);
-      setStatus("Seasons Ready");
+      setActiveSeasonIdx(0);
+      setStatus("Series Ready");
     }
   }, [api]);
-
-  const openSeason = useCallback(async (season) => {
-    setStatus("Loading Episodes...");
-    setActiveSeason(season);
-    const j = await api(`/api/vod-list?movie_id=${activeSeries.id}&season_id=${season.id}`);
-    if (j.ok) {
-      setEpisodes(j.data || []);
-      setNavZone("episodes");
-      setFocusIndex(0);
-      setStatus("Episodes Ready");
-    }
-  }, [api, activeSeries]);
 
   const toggleFavorite = useCallback((item) => {
     if (!item) return;
@@ -176,23 +160,27 @@ function App() {
     });
   }, []);
 
-  const playItem = useCallback(async (item, isSeriesEpisode = false) => {
+  const playItem = useCallback(async (item) => {
     if (!item) return; setSelectedItem(item); setStatus("Connecting...");
-    let type = (section === "Media library" || activeSeries) ? "vod" : "itv";
-    let series = isSeriesEpisode ? "2" : "0";
-    
-    let path = `/api/create-link?type=${type}&cmd=${encodeURIComponent(cmdOf(item))}&series=${series}`;
-    if (isSeriesEpisode) {
-        path += `&movie_id=${activeSeries.id}&season_id=${activeSeason.id}&episode_id=${item.id}`;
-        console.log("MOVIE_ID", activeSeries.id, "SEASON_ID", activeSeason.id, "EPISODE_ID", item.id, "CMD", cmdOf(item));
-    }
-
+    let path = `/api/create-link?type=${(section === "Media library") ? "vod" : "itv"}&cmd=${encodeURIComponent(cmdOf(item))}`;
     const j = await api(path);
     if (j.ok && j.url) {
       setIsPlaying(true); setIsPaused(false); setOverlay(true);
       AVPlayer.play(j.url, setStatus, (c, d) => setProgress({ current: c, duration: d }));
     } else { setStatus("Stream Error"); }
-  }, [section, api, activeSeries, activeSeason]);
+  }, [section, api]);
+
+  const playEpisode = useCallback(async (episode) => {
+    setSelectedItem(episode);
+    setStatus("Connecting Episode...");
+    const season = seriesMetadata.seasons[activeSeasonIdx];
+    const path = `/api/episode-link?series_id=${seriesMetadata.id}&season_id=${season.id}&episode_id=${episode.id}`;
+    const j = await api(path);
+    if (j.ok && j.url) {
+      setIsPlaying(true); setIsPaused(false); setOverlay(true);
+      AVPlayer.play(j.url, setStatus, (c, d) => setProgress({ current: c, duration: d }));
+    } else { setStatus("Episode Stream Error"); }
+  }, [api, seriesMetadata, activeSeasonIdx]);
 
   const showOverlay = useCallback(() => {
     setOverlay(true);
@@ -212,8 +200,10 @@ function App() {
         if (editingProvider) { setEditingProvider(null); setFocusIndex(0); return; }
         if (overlay && navZone === "player") { setNavZone("items"); setOverlay(false); return; }
         if (isPlaying) { AVPlayer.stop(); setIsPlaying(false); return; }
-        if (episodes.length > 0 && navZone === "episodes") { setNavZone("seasons"); setFocusIndex(0); return; }
-        if (seasons.length > 0 && navZone === "seasons") { setActiveSeries(null); setNavZone("items"); setFocusIndex(0); return; }
+        if (seriesMetadata) {
+          if (navZone === "episodes") { setNavZone("seasons"); setFocusIndex(activeSeasonIdx); return; }
+          setSeriesMetadata(null); setNavZone("items"); setFocusIndex(0); return;
+        }
         if (navZone === "items") { setNavZone(["Settings","Favorites","Search"].includes(section) ? "menu" : "categories"); setFocusIndex(0); return; }
         if (navZone === "categories") { setNavZone("menu"); return; }
         return;
@@ -231,14 +221,14 @@ function App() {
                 navZone === "categories" ? categories?.length || 0 :
                 navZone === "items" ? (section === "Settings" ? (editingProvider ? 10 : providers?.length + 1) : items?.length || 0) :
                 navZone === "player" ? 6 :
-                navZone === "seasons" ? seasons.length :
-                navZone === "episodes" ? episodes.length : 0;
+                navZone === "seasons" ? seriesMetadata?.seasons?.length || 0 :
+                navZone === "episodes" ? seriesMetadata?.seasons[activeSeasonIdx]?.episodes?.length || 0 : 0;
       switch(key) {
         case 38: setFocusIndex(p => Math.max(0, p - 1)); break;
         case 40: setFocusIndex(p => Math.min(max - 1, p + 1)); break;
         case 37: 
-          if (navZone === "episodes") { setNavZone("seasons"); setFocusIndex(0); }
-          else if (navZone === "seasons") { setActiveSeries(null); setNavZone("items"); }
+          if (navZone === "episodes") { setNavZone("seasons"); setFocusIndex(activeSeasonIdx); }
+          else if (navZone === "seasons") { setSeriesMetadata(null); setNavZone("items"); }
           else if (navZone === "items") { setNavZone(["Settings","Favorites","Search"].includes(section) ? "menu" : "categories"); }
           else if (navZone === "categories" || navZone === "player") { setNavZone("menu"); }
           break;
@@ -255,14 +245,14 @@ function App() {
             const it = items[focusIndex];
             if (it.is_series == 1 || it.series == 1) openSeries(it);
             else playItem(it);
-          } else if (navZone === "seasons") openSeason(seasons[focusIndex]);
-          else if (navZone === "episodes") playItem(episodes[focusIndex], true);
+          } else if (navZone === "seasons") { setActiveSeasonIdx(focusIndex); setNavZone("episodes"); setFocusIndex(0); }
+          else if (navZone === "episodes") playEpisode(seriesMetadata.seasons[activeSeasonIdx].episodes[focusIndex]);
           break;
       }
     };
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
-  }, [navZone, focusIndex, categories, items, section, isPlaying, overlay, editingProvider, providers, isPaused, showOverlay, loadSection, loadItems, playItem, activeSeries, activeSeason, seasons, episodes, openSeries, openSeason, toggleFavorite, api]);
+  }, [navZone, focusIndex, categories, items, section, isPlaying, overlay, editingProvider, providers, isPaused, showOverlay, loadSection, loadItems, playItem, seriesMetadata, activeSeasonIdx, openSeries, playEpisode, toggleFavorite, api]);
 
   useEffect(() => {
     const f = document.querySelector('.focused');
@@ -282,7 +272,7 @@ function App() {
         </div>
       </nav>
 
-      {(categories?.length > 0 && !activeSeries) && (
+      {(categories?.length > 0 && !seriesMetadata) && (
         <section className={`cat-panel ${navZone === "categories" ? "active-zone" : ""}`}>
           <div className="scroll-list">
             {categories.map((c, i) => (
@@ -292,33 +282,33 @@ function App() {
         </section>
       )}
 
-      {activeSeries && (
+      {seriesMetadata && (
          <section className={`cat-panel active-zone`}>
             <div className="scroll-list">
-               {seasons.map((s, i) => (
-                 <div key={i} className={`list-row ${activeSeason === s ? "active" : ""} ${navZone === "seasons" && focusIndex === i ? "focused" : ""}`}>{titleOf(s)}</div>
+               {seriesMetadata.seasons.map((s, i) => (
+                 <div key={i} className={`list-row ${activeSeasonIdx === i ? "active" : ""} ${navZone === "seasons" && focusIndex === i ? "focused" : ""}`}>Season {s.seasonNumber}</div>
                ))}
             </div>
          </section>
       )}
 
       <main className={`content-area ${(navZone === "items" || navZone === "episodes") ? "active-zone" : ""}`}>
-        <header className="main-header"><h1>{activeSeries ? activeSeries.name : (selectedCat ? titleOf(selectedCat) : section)}</h1></header>
+        <header className="main-header"><h1>{seriesMetadata ? seriesMetadata.id : (selectedCat ? titleOf(selectedCat) : section)}</h1></header>
         <div className="player-wrapper">
           {isPlaying && (
             <div className={`player-overlay visible ${navZone === "player" ? "active-zone" : ""}`}>
                <div className="stb-info-tile"><h2>{titleOf(selectedItem)}</h2></div>
             </div>
           )}
-          {!isPlaying && activeSeries && <div className="series-poster-hero" style={{backgroundImage: `url(${thumbOf(activeSeries)})`, backgroundSize:'cover', height:'100%', borderRadius:'30px'}}>
-            <div style={{padding:'60px', background:'rgba(0,0,0,0.7)', height:'100%'}}><p>{activeSeries.description || activeSeries.info}</p></div>
+          {!isPlaying && seriesMetadata && <div className="series-poster-hero" style={{background:'rgba(229, 9, 20, 0.2)', height:'100%', borderRadius:'30px', display:'flex', alignItems:'center', justifyContent:'center'}}>
+            <Layers size={100} color="#e50914" />
           </div>}
         </div>
 
-        <div className={`items-container ${(section === "Live streams" || activeSeries) ? "list-mode" : "grid-mode"}`}>
-          {activeSeries ? (
-            episodes.map((ep, i) => (
-              <div key={i} className={`item-card list-mode ${navZone === "episodes" && focusIndex === i ? "focused" : ""}`} style={{padding:'25px'}}><b>{titleOf(ep)}</b></div>
+        <div className={`items-container ${(section === "Live streams" || seriesMetadata) ? "list-mode" : "grid-mode"}`}>
+          {seriesMetadata ? (
+            seriesMetadata.seasons[activeSeasonIdx]?.episodes.map((ep, i) => (
+              <div key={i} className={`item-card list-mode ${navZone === "episodes" && focusIndex === i ? "focused" : ""}`} style={{padding:'25px'}}><b>{ep.episodeNumber}. {ep.title}</b></div>
             ))
           ) : (
             (items || []).map((it, i) => (
