@@ -30,15 +30,17 @@ const thumbOf = (it) => it?.tmdb_poster || it?.screenshot || it?.logo || it?.tv_
 
 const AVPlayer = {
   isAvailable: !!(window.webapis && window.webapis.avplay),
-  state: "IDLE",
-  ratio: "FIT",
+  el: null,
   init: function() {
     if (!this.isAvailable) return;
-    const keys = ["MediaPlay", "MediaPause", "MediaStop", "MediaRewind", "MediaFastForward", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "ChannelUp", "ChannelDown", "VolumeUp", "VolumeDown", "VolumeMute", "Info", "Guide", "Search", "Menu", "Source", "ColorRed", "ColorGreen", "ColorYellow", "ColorBlue"];
-    keys.forEach(k => { try { window.tizen.tvinputdevice.registerKey(k); } catch(e){} });
+    try {
+      const keys = ["MediaPlay", "MediaPause", "MediaStop", "MediaRewind", "MediaFastForward", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "ChannelUp", "ChannelDown", "VolumeUp", "VolumeDown", "VolumeMute", "Info", "Guide", "Search", "Menu", "Source", "ColorRed", "ColorGreen", "ColorYellow", "ColorBlue"];
+      keys.forEach(k => { try { window.tizen.tvinputdevice.registerKey(k); } catch(e){} });
+      this.el = document.getElementById("av-player");
+    } catch(e){}
   },
   play: function(url, onStatus, onProgress) {
-    if (!this.isAvailable) return;
+    if (!this.isAvailable) return false;
     try {
       this.stop();
       window.webapis.avplay.open(url);
@@ -46,27 +48,20 @@ const AVPlayer = {
       window.webapis.avplay.setListener({
         onbufferingstart: () => onStatus("Buffering..."),
         onbufferingcomplete: () => onStatus("Playing"),
-        onstreamcompleted: () => { this.state = "IDLE"; onStatus("Finished"); },
-        onerror: (e) => onStatus("Playback Error: " + e),
-        onpreparecomplete: () => { 
-          window.webapis.avplay.play(); 
-          this.state = "PLAYING"; 
-          onStatus("Playing");
-        },
+        onerror: (e) => onStatus("AVPlayer Error: " + e),
+        onpreparecomplete: () => { window.webapis.avplay.play(); },
         oncurrentplaytime: (t) => onProgress(t, window.webapis.avplay.getDuration())
       });
       window.webapis.avplay.prepareAsync();
-    } catch(e){ onStatus("Error: " + e.message); }
+      return true;
+    } catch(e){ 
+      console.error("AVPlayer Play Error", e);
+      return false; 
+    }
   },
-  stop: function() { if(this.isAvailable){ try { window.webapis.avplay.stop(); } catch(e){} this.state = "IDLE"; } },
-  pause: function() { if(this.isAvailable && (this.state === "PLAYING" || this.state === "RESUMED")){ window.webapis.avplay.pause(); this.state = "PAUSED"; } },
-  resume: function() { if(this.isAvailable && this.state === "PAUSED"){ window.webapis.avplay.play(); this.state = "PLAYING"; } },
-  seek: function(ms) { if(this.isAvailable) try { window.webapis.avplay.jumpForward(ms); } catch(e){} },
-  setRatio: function(m) {
-    this.ratio = m;
-    if(!this.isAvailable) return;
-    try { window.webapis.avplay.setDisplayRect(0, 0, 1920, 1080); } catch(e){}
-  }
+  stop: function() { if(this.isAvailable){ try { window.webapis.avplay.stop(); } catch(e){} } },
+  pause: function() { if(this.isAvailable){ try { window.webapis.avplay.pause(); } catch(e){} } },
+  resume: function() { if(this.isAvailable){ try { window.webapis.avplay.play(); } catch(e){} } }
 };
 
 const Cache = {
@@ -83,6 +78,7 @@ function App() {
   const [selectedItem, setSelectedItem] = useState(null);
   const [status, setStatus] = useState("Ready");
   const [isPlaying, setIsPlaying] = useState(false);
+  const [playUrl, setPlayUrl] = useState("");
   const [providers, setProviders] = useState([]);
   const [favorites, setFavorites] = useState(() => {
     try { return JSON.parse(localStorage.getItem("favs") || "[]"); } catch(e){ return []; }
@@ -126,7 +122,7 @@ function App() {
 
   const loadSection = useCallback(async (sec) => {
     setSection(sec); setCategories([]); setItems([]); setSelectedCat(null); setSelectedItem(null);
-    setIsPlaying(false); setSeriesData(null); AVPlayer.stop();
+    setIsPlaying(false); setPlayUrl(""); setSeriesData(null); AVPlayer.stop();
     
     zoneIndices.current = { menu: zoneIndices.current.menu, categories: 0, items: 0, seasons: 0, episodes: 0, player: 0 };
 
@@ -191,8 +187,17 @@ function App() {
     let type = (section === "Media library") ? "vod" : "itv";
     const j = await api(`/api/create-link?type=${type}&cmd=${encodeURIComponent(cmdOf(item))}`);
     if (j.ok && j.url) {
-      setIsPlaying(true); setOverlay(true); switchZone("player");
-      AVPlayer.play(j.url, setStatus, (c, d) => setProgress({ current: c, duration: d }));
+      setPlayUrl(j.url);
+      setIsPlaying(true); 
+      setOverlay(true); 
+      const usedAV = AVPlayer.play(j.url, setStatus, (c, d) => setProgress({ current: c, duration: d }));
+      if (usedAV) {
+        switchZone("player");
+      } else {
+        // Fallback for browser testing or if AVPlayer fails
+        setStatus("Playing (HTML5)");
+        switchZone("player");
+      }
     } else { setStatus("Stream Error"); }
   }, [section, api, switchZone, openSeries]);
 
@@ -202,8 +207,11 @@ function App() {
     const season = seriesData.seasons[activeSeasonIdx];
     const j = await api(`/api/episode-link?series_id=${seriesData.id}&season_id=${season.id}&episode_id=${episode.id}`);
     if (j.ok && j.url) {
-      setIsPlaying(true); setOverlay(true); switchZone("player");
-      AVPlayer.play(j.url, setStatus, (c, d) => setProgress({ current: c, duration: d }));
+      setPlayUrl(j.url);
+      setIsPlaying(true); setOverlay(true);
+      const usedAV = AVPlayer.play(j.url, setStatus, (c, d) => setProgress({ current: c, duration: d }));
+      if (!usedAV) setStatus("Playing Episode (HTML5)");
+      switchZone("player");
     } else { setStatus("Episode Stream Error"); }
   }, [api, seriesData, activeSeasonIdx, switchZone]);
 
@@ -222,7 +230,13 @@ function App() {
       if ([37, 38, 39, 40, 13, 10009, 27, 415, 19, 413, 412, 417, 427, 428, 447, 448, 10153].includes(key)) e.preventDefault();
 
       if (key === 10009 || key === 27) { // Back
-        if (isPlaying) { AVPlayer.stop(); setIsPlaying(false); switchZone(seriesData ? "episodes" : "items"); return; }
+        if (isPlaying) { 
+            AVPlayer.stop(); 
+            setIsPlaying(false); 
+            setPlayUrl("");
+            switchZone(seriesData ? "episodes" : "items"); 
+            return; 
+        }
         if (seriesData) {
           if (navZone === "episodes") { switchZone("seasons"); return; }
           setSeriesData(null); switchZone("items"); return;
@@ -240,7 +254,7 @@ function App() {
         case 427: if (navZone === "items" && focusIndex < items.length - 1) { setFocusIndex(p => p + 1); if (isPlaying) playItem(items[focusIndex + 1]); } break;
         case 428: if (navZone === "items" && focusIndex > 0) { setFocusIndex(p => p - 1); if (isPlaying) playItem(items[focusIndex - 1]); } break;
         case 415: case 19: if (isPlaying) { isPaused ? AVPlayer.resume() : AVPlayer.pause(); setIsPaused(!isPaused); } break;
-        case 413: if (isPlaying) { AVPlayer.stop(); setIsPlaying(false); switchZone("items"); } break;
+        case 413: if (isPlaying) { AVPlayer.stop(); setIsPlaying(false); setPlayUrl(""); switchZone("items"); } break;
       }
 
       let max = navZone === "menu" ? MENU.length : 
@@ -280,7 +294,7 @@ function App() {
              if (focusIndex === 0) { isPaused ? AVPlayer.resume() : AVPlayer.pause(); setIsPaused(!isPaused); }
              if (focusIndex === 1) AVPlayer.seek(-30000);
              if (focusIndex === 2) AVPlayer.seek(30000);
-             if (focusIndex === 3) { AVPlayer.stop(); setIsPlaying(false); switchZone("items"); }
+             if (focusIndex === 3) { AVPlayer.stop(); setIsPlaying(false); setPlayUrl(""); switchZone("items"); }
           }
           break;
       }
@@ -300,90 +314,112 @@ function App() {
   };
 
   return (
-    <div className={`app-shell ${isPlaying ? "video-playing" : ""}`}>
-      <nav className={`sidebar ${navZone === "menu" ? "active-zone" : ""}`}>
-        <div className="brand"><span>POOMANI TV</span></div>
-        <div className="nav-links">
-          {MENU.map((m, i) => (
-            <div key={m.id} className={`nav-item ${section === m.id ? "current" : ""} ${navZone === "menu" && focusIndex === i ? "focused" : ""}`}>
-              <m.icon size={32} /><span>{m.label}</span>
+    <>
+      {/* Cinematic Background Layer */}
+      <div className={`bg-layer ${isPlaying ? "video-playing" : ""}`} />
+
+      <div className={`app-shell ${isPlaying ? "video-playing" : ""}`}>
+        
+        {/* Background HTML5 Video Fallback */}
+        {isPlaying && playUrl && (
+          <video 
+            src={playUrl} 
+            autoPlay 
+            controls={false}
+            style={{ 
+              position: 'fixed', inset: 0, width: '100%', height: '100%', 
+              objectFit: 'contain', zIndex: -2, background: 'black' 
+            }}
+            onTimeUpdate={(e) => setProgress({ current: e.target.currentTime * 1000, duration: e.target.duration * 1000 })}
+            onPlaying={() => setStatus("Playing (HTML5)")}
+            onError={() => setStatus("HTML5 Video Error")}
+          />
+        )}
+
+        <nav className={`sidebar ${navZone === "menu" ? "active-zone" : ""}`}>
+          <div className="brand"><span>POOMANI TV</span></div>
+          <div className="nav-links">
+            {MENU.map((m, i) => (
+              <div key={m.id} className={`nav-item ${section === m.id ? "current" : ""} ${navZone === "menu" && focusIndex === i ? "focused" : ""}`}>
+                <m.icon size={32} /><span>{m.label}</span>
+              </div>
+            ))}
+          </div>
+        </nav>
+
+        {categories.length > 0 && !seriesData && (
+          <section className={`cat-panel ${navZone === "categories" ? "active-zone" : ""}`}>
+            <div className="panel-header"><h3>{section}</h3></div>
+            <div className="scroll-list">
+              {section !== "Shows archive" && (
+                <div className={`list-row ${navZone === "categories" && focusIndex === 0 ? "focused" : ""}`}>All Content</div>
+              )}
+              {categories.map((c, i) => (
+                <div key={i} className={`list-row ${navZone === "categories" && focusIndex === (section !== "Shows archive" ? i + 1 : i) ? "focused" : ""}`}>{titleOf(c)}</div>
+              ))}
             </div>
-          ))}
-        </div>
-      </nav>
+          </section>
+        )}
 
-      {categories.length > 0 && !seriesData && (
-        <section className={`cat-panel ${navZone === "categories" ? "active-zone" : ""}`}>
-          <div className="panel-header"><h3>{section}</h3></div>
-          <div className="scroll-list">
-            {section !== "Shows archive" && (
-              <div className={`list-row ${navZone === "categories" && focusIndex === 0 ? "focused" : ""}`}>All Content</div>
+        {seriesData && (
+          <section className={`cat-panel ${navZone === "seasons" ? "active-zone" : ""}`}>
+            <div className="panel-header"><h3>Seasons</h3></div>
+            <div className="scroll-list">
+              {seriesData.seasons.map((s, i) => (
+                <div key={i} className={`list-row ${activeSeasonIdx === i ? "active" : ""} ${navZone === "seasons" && focusIndex === i ? "focused" : ""}`}>Season {s.seasonNumber}</div>
+              ))}
+            </div>
+          </section>
+        )}
+
+        <main className={`content-area ${(navZone === "items" || navZone === "episodes") ? "active-zone" : ""}`}>
+          <header className="main-header">
+             <h1>{seriesData ? seriesData.originalItem.name : (selectedCat ? titleOf(selectedCat) : section)}</h1>
+             <div className="status-badge">{status} | {navZone} [{focusIndex}]</div>
+          </header>
+
+          <div className={`items-container ${ (section === "Live streams" || navZone === "episodes") ? "list-mode" : "grid-mode"}`}>
+            {seriesData ? (
+               seriesData.seasons[activeSeasonIdx]?.episodes.map((ep, i) => (
+                <div key={i} className={`item-card list-mode ${navZone === "episodes" && focusIndex === i ? "focused" : ""}`}>
+                   <div className="live-row"><span className="ch-num">E{ep.episodeNumber}</span><b className="ch-title">{ep.title}</b></div>
+                </div>
+              ))
+            ) : (
+              items.map((it, i) => (
+                <div key={i} className={`item-card ${section === "Live streams" ? "list-mode" : ""} ${navZone === "items" && focusIndex === i ? "focused" : ""}`}>
+                  {section === "Live streams" ? (
+                    <div className="live-row"><span className="ch-num">{i+1}</span><b className="ch-title">{titleOf(it)}</b></div>
+                  ) : (
+                    <div className="card-inner">
+                      <img src={thumbOf(it)} alt="" />
+                      <div className="card-content">{titleOf(it)}</div>
+                    </div>
+                  )}
+                </div>
+              ))
             )}
-            {categories.map((c, i) => (
-              <div key={i} className={`list-row ${navZone === "categories" && focusIndex === (section !== "Shows archive" ? i + 1 : i) ? "focused" : ""}`}>{titleOf(c)}</div>
-            ))}
           </div>
-        </section>
-      )}
+        </main>
 
-      {seriesData && (
-        <section className={`cat-panel ${navZone === "seasons" ? "active-zone" : ""}`}>
-          <div className="panel-header"><h3>Seasons</h3></div>
-          <div className="scroll-list">
-            {seriesData.seasons.map((s, i) => (
-              <div key={i} className={`list-row ${activeSeasonIdx === i ? "active" : ""} ${navZone === "seasons" && focusIndex === i ? "focused" : ""}`}>Season {s.seasonNumber}</div>
-            ))}
-          </div>
-        </section>
-      )}
-
-      <main className={`content-area ${(navZone === "items" || navZone === "episodes") ? "active-zone" : ""}`}>
-        <header className="main-header">
-           <h1>{seriesData ? seriesData.originalItem.name : (selectedCat ? titleOf(selectedCat) : section)}</h1>
-           <div className="status-badge">{status} | {navZone} [{focusIndex}]</div>
-        </header>
-
-        <div className={`items-container ${ (section === "Live streams" || navZone === "episodes") ? "list-mode" : "grid-mode"}`}>
-          {seriesData ? (
-             seriesData.seasons[activeSeasonIdx]?.episodes.map((ep, i) => (
-              <div key={i} className={`item-card list-mode ${navZone === "episodes" && focusIndex === i ? "focused" : ""}`}>
-                 <div className="live-row"><span className="ch-num">E{ep.episodeNumber}</span><b className="ch-title">{ep.title}</b></div>
-              </div>
-            ))
-          ) : (
-            items.map((it, i) => (
-              <div key={i} className={`item-card ${section === "Live streams" ? "list-mode" : ""} ${navZone === "items" && focusIndex === i ? "focused" : ""}`}>
-                {section === "Live streams" ? (
-                  <div className="live-row"><span className="ch-num">{i+1}</span><b className="ch-title">{titleOf(it)}</b></div>
-                ) : (
-                  <div className="card-inner">
-                    <img src={thumbOf(it)} alt="" />
-                    <div className="card-content">{titleOf(it)}</div>
-                  </div>
-                )}
-              </div>
-            ))
-          )}
+        <div className={`full-player-ui ${isPlaying && overlay ? "visible" : ""}`}>
+            <div className="player-header"><h1 className="player-title">{titleOf(selectedItem)}</h1></div>
+            <div className="player-controls-container">
+                <div className="progress-track"><div className="progress-fill" style={{width: `${(progress.current / (progress.duration || 1)) * 100}%`}}></div></div>
+                <div className="player-times"><span>{formatT(progress.current)}</span><span>{formatT(progress.duration)}</span></div>
+                <div className="player-actions">
+                    <div className={`player-btn ${navZone === "player" && focusIndex === 0 ? "focused" : ""}`}>{isPaused ? <Play size={80} fill="white"/> : <Pause size={80} fill="white"/>}</div>
+                    <div className={`player-btn ${navZone === "player" && focusIndex === 1 ? "focused" : ""}`}><SkipBack size={60} /></div>
+                    <div className={`player-btn ${navZone === "player" && focusIndex === 2 ? "focused" : ""}`}><SkipForward size={60} /></div>
+                    <div className={`player-btn ${navZone === "player" && focusIndex === 3 ? "focused" : ""}`}><AlertCircle size={60} /></div>
+                </div>
+            </div>
         </div>
-      </main>
-
-      <div className={`full-player-ui ${isPlaying && overlay ? "visible" : ""}`}>
-          <div className="player-header"><h1 className="player-title">{titleOf(selectedItem)}</h1></div>
-          <div className="player-controls-container">
-              <div className="progress-track"><div className="progress-fill" style={{width: `${(progress.current / (progress.duration || 1)) * 100}%`}}></div></div>
-              <div className="player-times"><span>{formatT(progress.current)}</span><span>{formatT(progress.duration)}</span></div>
-              <div className="player-actions">
-                  <div className={`player-btn ${navZone === "player" && focusIndex === 0 ? "focused" : ""}`}>{isPaused ? <Play size={80} fill="white"/> : <Pause size={80} fill="white"/>}</div>
-                  <div className={`player-btn ${navZone === "player" && focusIndex === 1 ? "focused" : ""}`}><SkipBack size={60} /></div>
-                  <div className={`player-btn ${navZone === "player" && focusIndex === 2 ? "focused" : ""}`}><SkipForward size={60} /></div>
-                  <div className={`player-btn ${navZone === "player" && focusIndex === 3 ? "focused" : ""}`}><AlertCircle size={60} /></div>
-              </div>
-          </div>
+        {isPlaying && (status === "Buffering..." || status.includes("Error") || status === "Connecting...") && (
+           <div className="playback-status-center">{status}</div>
+        )}
       </div>
-      {isPlaying && (status === "Buffering..." || status.includes("Error") || status === "Connecting...") && (
-         <div className="playback-status-center">{status}</div>
-      )}
-    </div>
+    </>
   );
 }
 
