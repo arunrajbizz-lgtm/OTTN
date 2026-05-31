@@ -31,7 +31,7 @@ let PROVIDERS = [
   }
 ];
 
-let currentIdx = 0; // Defaulting back to Airtel (idx 0)
+let currentIdx = 0; 
 let token = "";
 let randomValue = "";
 
@@ -42,46 +42,49 @@ function p() { return PROVIDERS[currentIdx]; }
 function getHeaders(useAuth = false) {
   const headers = {
     "User-Agent": USER_AGENT,
-    "X-User-Agent": "Model: MAG250; Link: WiFi",
     "Referer": `${p().portal}/c/index.html`,
-    "Origin": p().portal,
     "Cookie": `mac=${p().mac}; stb_lang=en; timezone=Asia/Kolkata`,
     "Accept": "*/*",
-    "Accept-Language": "en-US,en;q=0.9",
     "Connection": "Keep-Alive",
   };
   if (useAuth && token) headers["Authorization"] = `Bearer ${token}`;
   return headers;
 }
 
-async function stalkerRequest(params, useAuth = false) {
+async function stalkerRequest(params, useAuth = false, customHeaders = null) {
   const action = params.action || params.type;
   try {
-    const res = await axios.get(`${p().portal}/server/load.php`, {
+    const url = `${p().portal}/server/load.php`;
+    const headers = customHeaders || getHeaders(useAuth);
+    
+    // DEBUG: Log the full request details
+    console.log(`[Request] ${url}?${new URLSearchParams(params).toString()}`);
+    // console.log(`[Headers]`, JSON.stringify(headers));
+
+    const res = await axios.get(url, {
       params,
-      headers: getHeaders(useAuth),
-      timeout: 20000,
+      headers,
+      timeout: 15000,
       validateStatus: () => true,
     });
 
     let data = res.data;
     if (typeof data === "string") {
       const trimmed = data.trim();
-      if (trimmed.startsWith("<")) {
-          console.error(`[Portal] ${p().name} returned HTML (Access Denied / Blocked)`);
-          return { error: "HTML_RESPONSE" };
-      }
+      if (trimmed.startsWith("<")) return { error: "HTML_RESPONSE", raw: trimmed.substring(0, 100) };
       try { data = JSON.parse(trimmed); } catch (e) { data = { raw_text: trimmed }; }
     }
     return data;
   } catch (err) {
-    console.error(`[Portal] Axios Error (${action}):`, err.message);
+    console.error(`[Axios] Error:`, err.message);
     throw err;
   }
 }
 
 async function doHandshake() {
-  console.log(`[Auth] ${p().name} Handshake Phase 1...`);
+  console.log(`[Auth] Handshake Start for ${p().name}...`);
+  
+  // Strategy 1: Standard Stalker Handshake
   let data = await stalkerRequest({ 
     type: "stb", 
     action: "handshake", 
@@ -89,32 +92,29 @@ async function doHandshake() {
     JsHttpRequest: "1-xml" 
   });
   
-  if (data?.js === false || !data || data.error) {
-      console.warn(`[Auth] Standard handshake rejected, trying Phase 2 (Legacy)...`);
+  // Strategy 2: Fallback to plain handshake if failed
+  if (!data || data.js === false || data.error) {
+      console.warn(`[Auth] Strategy 1 failed, trying fallback...`);
       data = await stalkerRequest({ 
         type: "stb", 
-        action: "handshake", 
-        token: ""
+        action: "handshake"
       });
   }
 
-  console.log(`[Auth] ${p().name} Handshake Response:`, JSON.stringify(data));
+  console.log(`[Auth] Response:`, JSON.stringify(data));
 
   token = data?.js?.token || data?.token || data?.results?.token || "";
   randomValue = data?.js?.random || data?.random || data?.results?.random || "";
   
-  if (!token) {
-    console.error(`[Auth] CRITICAL: Handshake failed to return token.`);
-    throw new Error("Handshake failed");
-  }
+  if (!token) throw new Error("Handshake failed");
   
-  console.log(`[Auth] Handshake OK. Token: ${token.substring(0, 6)}...`);
+  console.log(`[Auth] Token OK: ${token.substring(0, 6)}...`);
   return data;
 }
 
 async function getProfile() {
   if (!token) await doHandshake();
-  const profile = await stalkerRequest({
+  return await stalkerRequest({
     type: "stb",
     action: "get_profile",
     hd: "1",
@@ -124,11 +124,15 @@ async function getProfile() {
     device_id: p().deviceId,
     device_id2: p().deviceId2,
     signature: p().signature,
+    auth_second_step: "1",
+    hw_version: "1.7-BD-00",
+    not_valid_token: "0",
+    client_type: "STB",
+    hw_version_2: p().deviceId.toLowerCase(),
     timestamp: Math.floor(Date.now() / 1000),
     metrics: JSON.stringify({ mac: p().mac, sn: p().sn, model: "MAG250", type: "STB", uid: p().deviceId, random: randomValue }),
     JsHttpRequest: "1-xml",
   }, true);
-  return profile;
 }
 
 async function ensureAuth() {
@@ -143,26 +147,7 @@ function normalizeArray(data) {
   if (Array.isArray(data?.js)) return data.js;
   if (Array.isArray(data?.js?.data)) return data.js.data;
   if (Array.isArray(data?.data)) return data.data;
-  if (Array.isArray(data?.results)) return data.results;
   return [];
-}
-
-function extractUrl(data, originalCmd = "") {
-  const js = data?.js || {};
-  let cmd = js.cmd || js.url || js.stream_url || js.ffmpeg_cmd || data.cmd || data.url || "";
-  if (typeof data?.js === "string") cmd = data.js;
-  let finalUrl = String(cmd).trim().replace(/^(ffmpeg|ffrt|mpv|auto)\s+/i, "").trim();
-  if (finalUrl.startsWith("?token=")) {
-      let base = String(originalCmd).replace(/^(ffmpeg|ffrt|mpv|auto)\s+/i, "").trim();
-      if (base.startsWith("http")) {
-          const sep = base.includes("?") ? "&" : "?";
-          return base + sep + finalUrl.substring(1);
-      }
-      if (js.stream_url && js.stream_url.includes("://")) {
-          return js.stream_url.split('?')[0] + finalUrl;
-      }
-  }
-  return finalUrl;
 }
 
 // Routes
@@ -174,8 +159,28 @@ app.get("/api/connect", async (req, res) => {
     const profile = await ensureAuth();
     res.json({ ok: true, token, profile, provider: p().name });
   } catch (err) { 
-    res.json({ ok: false, error: err.message, provider: p().name, portal: p().portal }); 
+    res.json({ ok: false, error: err.message, portal: p().portal }); 
   }
+});
+
+app.get("/api/handshake-debug", async (req, res) => {
+  const { portal, mac } = req.query;
+  if (!portal || !mac) return res.json({ error: "Missing portal or mac" });
+  
+  try {
+    const headers = {
+        "User-Agent": USER_AGENT,
+        "Referer": `${portal}/c/`,
+        "Cookie": `mac=${mac}; stb_lang=en; timezone=Asia/Kolkata`,
+        "Accept": "*/*"
+    };
+    const url = `${portal}/server/load.php`;
+    const r = await axios.get(url, {
+        params: { type: "stb", action: "handshake", token: "", JsHttpRequest: "1-xml" },
+        headers
+    });
+    res.json({ ok: true, response: r.data, sent_headers: headers });
+  } catch (e) { res.json({ ok: false, error: e.message }); }
 });
 
 app.get("/api/providers", (req, res) => {
@@ -230,21 +235,6 @@ app.get("/api/series-info", async (req, res) => {
   } catch (err) { res.json({ ok: false, error: err.message }); }
 });
 
-app.get("/api/series-debug", async (req, res) => {
-  try {
-    await ensureAuth();
-    const id = req.query.id;
-    const [test1, test2, test3, test4, test5] = await Promise.all([
-      stalkerRequest({ type: "vod", action: "get_ordered_list", movie_id: id, JsHttpRequest: "1-xml" }, true),
-      stalkerRequest({ type: "vod", action: "get_ordered_list", category: id, JsHttpRequest: "1-xml" }, true),
-      stalkerRequest({ type: "vod", action: "get_ordered_list", movie_id: id, season_id: "0", JsHttpRequest: "1-xml" }, true),
-      stalkerRequest({ type: "vod", action: "get_ordered_list", movie_id: id, force_ch_link_check: "1", JsHttpRequest: "1-xml" }, true),
-      stalkerRequest({ type: "vod", action: "get_ordered_list", cmd: `/media/${id}.mpg`, JsHttpRequest: "1-xml" }, true)
-    ]);
-    res.json({ test1, test2, test3, test4, test5 });
-  } catch (err) { res.json({ ok: false, error: err.message }); }
-});
-
 app.get("/api/create-link", async (req, res) => {
   try {
     await ensureAuth();
@@ -254,20 +244,20 @@ app.get("/api/create-link", async (req, res) => {
     if (season_id) params.season_id = season_id;
     if (episode_id) params.episode_id = episode_id;
     const data = await stalkerRequest(params, true);
-    const playUrl = extractUrl(data, cmd);
-    res.json({ ok: !!playUrl, url: playUrl, raw: data });
-  } catch (err) { res.json({ ok: false, error: err.message }); }
-});
+    
+    const js = data?.js || {};
+    let rawCmd = js.cmd || js.url || data.cmd || data.url || "";
+    if (typeof data?.js === "string") rawCmd = data.js;
+    
+    let playUrl = String(rawCmd).trim().replace(/^(ffmpeg|ffrt|mpv|auto)\s+/i, "").trim();
+    
+    // Token resolution fallback
+    if (playUrl.startsWith("?token=")) {
+        if (js.stream_url) playUrl = js.stream_url.split('?')[0] + playUrl;
+        else if (cmd.startsWith("http")) playUrl = cmd.split('?')[0] + playUrl;
+    }
 
-app.get("/api/search", async (req, res) => {
-  try {
-    await ensureAuth();
-    const q = req.query.q || "";
-    const [live, vod] = await Promise.all([
-      stalkerRequest({ type: "itv", action: "get_ordered_list", search: q, JsHttpRequest: "1-xml" }, true),
-      stalkerRequest({ type: "vod", action: "get_ordered_list", search: q, JsHttpRequest: "1-xml" }, true)
-    ]);
-    res.json({ ok: true, data: [...normalizeArray(live), ...normalizeArray(vod)] });
+    res.json({ ok: !!playUrl, url: playUrl, raw: data });
   } catch (err) { res.json({ ok: false, error: err.message }); }
 });
 
