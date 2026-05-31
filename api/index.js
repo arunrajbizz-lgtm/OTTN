@@ -206,6 +206,39 @@ app.get("/api/live-categories", async (req, res) => {
   } catch (err) { res.json({ ok: false, error: err.message }); }
 });
 
+app.get("/api/media-library", async (req, res) => {
+  try {
+    await ensureAuth();
+    const data = await stalkerRequest({ type: "vod", action: "get_categories", JsHttpRequest: "1-xml" }, true);
+    res.json({ ok: true, data: normalizeArray(data) });
+  } catch (err) { res.json({ ok: false, error: err.message }); }
+});
+
+app.get("/api/radio", async (req, res) => {
+  try {
+    await ensureAuth();
+    const data = await stalkerRequest({ type: "radio", action: "get_categories", JsHttpRequest: "1-xml" }, true);
+    res.json({ ok: true, data: normalizeArray(data) });
+  } catch (err) { res.json({ ok: false, error: err.message }); }
+});
+
+app.get("/api/archive-categories", async (req, res) => {
+  try {
+    await ensureAuth();
+    const data = await stalkerRequest({ type: "itv", action: "get_genres", JsHttpRequest: "1-xml" }, true);
+    res.json({ ok: true, data: normalizeArray(data) });
+  } catch (err) { res.json({ ok: false, error: err.message }); }
+});
+
+app.get("/api/archive-list", async (req, res) => {
+  try {
+    await ensureAuth();
+    const genre = req.query.genre || "*";
+    const data = await stalkerRequest({ type: "itv", action: "get_ordered_list", genre, JsHttpRequest: "1-xml" }, true);
+    res.json({ ok: true, data: normalizeArray(data) });
+  } catch (err) { res.json({ ok: false, error: err.message }); }
+});
+
 app.get("/api/live-channels", async (req, res) => {
   try {
     await ensureAuth();
