@@ -162,7 +162,7 @@ function App() {
       Cache.set(sec, j.data || []);
       switchZone("categories");
       setStatus("Ready");
-    } else { setStatus("Portal Error"); }
+    } else { setStatus("Portal Error: " + (j.error || "Unknown")); }
   }, [favorites, api, switchZone, updateFocus]);
 
   const loadItems = useCallback(async (cat) => {

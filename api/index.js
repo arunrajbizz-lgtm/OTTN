@@ -37,7 +37,7 @@ let PROVIDERS = [
   }
 ];
 
-let currentIdx = 1; 
+let currentIdx = 0; 
 let token = "";
 let randomValue = "";
 
