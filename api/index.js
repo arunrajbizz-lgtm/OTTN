@@ -143,25 +143,22 @@ app.get("/api/series-debug", async (req, res) => {
   try {
     await ensureAuth();
     const id = req.query.id;
-    const results = {};
+    
+    const [test1, test2, test3, test4, test5] = await Promise.all([
+      stalkerRequest({ type: "vod", action: "get_ordered_list", movie_id: id, JsHttpRequest: "1-xml" }, true),
+      stalkerRequest({ type: "vod", action: "get_ordered_list", category: id, JsHttpRequest: "1-xml" }, true),
+      stalkerRequest({ type: "vod", action: "get_ordered_list", movie_id: id, season_id: "0", JsHttpRequest: "1-xml" }, true),
+      stalkerRequest({ type: "vod", action: "get_ordered_list", movie_id: id, force_ch_link_check: "1", JsHttpRequest: "1-xml" }, true),
+      stalkerRequest({ type: "vod", action: "get_ordered_list", cmd: `/media/${id}.mpg`, JsHttpRequest: "1-xml" }, true)
+    ]);
 
-    // 1. movie_id only
-    results.movie_id_only = await stalkerRequest({ type: "vod", action: "get_ordered_list", movie_id: id, JsHttpRequest: "1-xml" }, true);
-    console.log("SERIES DEBUG (movie_id_only)", JSON.stringify(results.movie_id_only, null, 2));
+    console.log("SERIES DEBUG TEST 1", JSON.stringify(test1, null, 2));
+    console.log("SERIES DEBUG TEST 2", JSON.stringify(test2, null, 2));
+    console.log("SERIES DEBUG TEST 3", JSON.stringify(test3, null, 2));
+    console.log("SERIES DEBUG TEST 4", JSON.stringify(test4, null, 2));
+    console.log("SERIES DEBUG TEST 5", JSON.stringify(test5, null, 2));
 
-    // 2. category only (trying to see if ID works as category)
-    results.category_only = await stalkerRequest({ type: "vod", action: "get_ordered_list", category: id, JsHttpRequest: "1-xml" }, true);
-    console.log("SERIES DEBUG (category_only)", JSON.stringify(results.category_only, null, 2));
-
-    // 3. movie_id + season_id=0
-    results.movie_plus_season0 = await stalkerRequest({ type: "vod", action: "get_ordered_list", movie_id: id, season_id: "0", JsHttpRequest: "1-xml" }, true);
-    console.log("SERIES DEBUG (movie_plus_season0)", JSON.stringify(results.movie_plus_season0, null, 2));
-
-    // 4. movie_id + episode_id=0
-    results.movie_plus_episode0 = await stalkerRequest({ type: "vod", action: "get_ordered_list", movie_id: id, episode_id: "0", JsHttpRequest: "1-xml" }, true);
-    console.log("SERIES DEBUG (movie_plus_episode0)", JSON.stringify(results.movie_plus_episode0, null, 2));
-
-    res.json({ ok: true, results });
+    res.json({ test1, test2, test3, test4, test5 });
   } catch (err) { res.json({ ok: false, error: err.message }); }
 });
 
