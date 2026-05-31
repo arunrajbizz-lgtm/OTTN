@@ -8,7 +8,7 @@ import {
 } from "lucide-react";
 import "./style.css";
 
-const BACKEND = ""; // Relative for production
+const BACKEND = "https://ottn-production.up.railway.app"; // Railway backend URL
 
 const MENU = [
   { id: "Live streams", icon: Tv, label: "Live streams" },
