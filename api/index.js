@@ -63,7 +63,6 @@ function getHeaders(useAuth = false) {
 
 async function stalkerRequest(params, useAuth = false) {
   const url = `${p().portal}/server/load.php`;
-  console.log(`[Portal] Request: ${params.action} for ${p().name} (Auth: ${useAuth})`);
   try {
     const res = await axios.get(url, {
       params: { ...params, JsHttpRequest: "1-xml" },
@@ -72,19 +71,11 @@ async function stalkerRequest(params, useAuth = false) {
       validateStatus: () => true,
     });
     let data = res.data;
-    console.log(`[Portal] Response Status: ${res.status} for ${params.action}`);
-    
     if (typeof data === "string") {
       let trimmed = data.trim();
       const firstBrace = trimmed.search(/[\{\[]/);
-      if (firstBrace > 0) {
-        trimmed = trimmed.substring(firstBrace).trim();
-      }
-      try { 
-        data = JSON.parse(trimmed); 
-      } catch (e) { 
-        data = { raw_text: trimmed }; 
-      }
+      if (firstBrace > 0) trimmed = trimmed.substring(firstBrace).trim();
+      try { data = JSON.parse(trimmed); } catch (e) { data = { raw_text: trimmed }; }
     }
     return data;
   } catch (err) {
@@ -94,18 +85,14 @@ async function stalkerRequest(params, useAuth = false) {
 }
 
 async function doHandshake() {
-  console.log(`[Handshake] Starting for ${p().name}...`);
   const data = await stalkerRequest({ type: "stb", action: "handshake", token: "" });
   token = data?.js?.token || data?.token || data?.results?.token || "";
   randomValue = data?.js?.random || data?.random || data?.results?.random || "";
-  
   if (!token) throw new Error("Handshake failed");
-  console.log(`[Handshake] SUCCESS. Token: ${token.substring(0, 8)}...`);
   return data;
 }
 
 async function getProfile() {
-  console.log(`[Profile] Fetching for ${p().name}...`);
   if (!token) await doHandshake();
   return await stalkerRequest({
     type: "stb",
@@ -132,10 +119,8 @@ async function getProfile() {
 }
 
 async function ensureAuth() {
-  token = "";
-  randomValue = "";
-  await doHandshake();
-  return await getProfile();
+  if (!token) { await doHandshake(); await getProfile(); }
+  return true;
 }
 
 function normalizeArray(data) {
@@ -161,16 +146,12 @@ function extractUrl(data) {
 }
 
 const TMDB_KEY = "bab05eecb5b5691228f0a46852217cd2";
-
 async function getTMDBPoster(title, type = "movie") {
   if (!title) return null;
   try {
     const cleanTitle = title.split("(")[0].replace(/[^\w\s]/gi, '').trim();
     const searchUrl = `https://api.themoviedb.org/3/search/${type === "series" ? "tv" : "movie"}`;
-    const res = await axios.get(searchUrl, {
-      params: { api_key: TMDB_KEY, query: cleanTitle },
-      timeout: 3000
-    });
+    const res = await axios.get(searchUrl, { params: { api_key: TMDB_KEY, query: cleanTitle }, timeout: 3000 });
     const result = res.data.results?.[0];
     if (result?.poster_path) return `https://image.tmdb.org/t/p/w500${result.poster_path}`;
     return null;
@@ -178,7 +159,6 @@ async function getTMDBPoster(title, type = "movie") {
 }
 
 async function augmentWithTMDB(items, type = "movie") {
-  // Only augment first 30 items for performance
   const sliced = items.slice(0, 30);
   const rest = items.slice(30);
   const augmented = await Promise.all(sliced.map(async (it) => {
@@ -191,49 +171,25 @@ async function augmentWithTMDB(items, type = "movie") {
 }
 
 // Routes
-app.get("/api/status", (req, res) => {
-  res.json({ ok: true, provider: p().name, hasToken: !!token, currentIdx });
-});
-
-app.get("/api/providers", (req, res) => {
-  res.json({ ok: true, providers: PROVIDERS, currentIdx });
-});
-
+app.get("/api/status", (req, res) => res.json({ ok: true, provider: p().name, hasToken: !!token, currentIdx }));
+app.get("/api/providers", (req, res) => res.json({ ok: true, providers: PROVIDERS, currentIdx }));
 app.post("/api/providers/select", (req, res) => {
   const { index } = req.body;
-  if (index >= 0 && index < PROVIDERS.length) {
-    currentIdx = index;
-    token = ""; 
-    res.json({ ok: true, provider: PROVIDERS[currentIdx].name });
-  } else {
-    res.json({ ok: false, error: "Invalid index" });
-  }
+  if (index >= 0 && index < PROVIDERS.length) { currentIdx = index; token = ""; res.json({ ok: true, provider: PROVIDERS[currentIdx].name }); }
+  else res.json({ ok: false, error: "Invalid index" });
 });
 
 app.get("/api/live-categories", async (req, res) => {
-  try {
-    await ensureAuth();
-    const raw = await stalkerRequest({ type: "itv", action: "get_genres" }, true);
-    res.json({ ok: true, data: normalizeArray(raw) });
-  } catch (err) { res.json({ ok: false, error: err.message }); }
+  try { await ensureAuth(); const raw = await stalkerRequest({ type: "itv", action: "get_genres" }, true); res.json({ ok: true, data: normalizeArray(raw) }); }
+  catch (err) { res.json({ ok: false, error: err.message }); }
 });
 
 app.get("/api/live-channels", async (req, res) => {
   try {
     await ensureAuth();
     const genre = req.query.genre || "*";
-    const raw = await stalkerRequest({ 
-      type: "itv", 
-      action: "get_ordered_list", 
-      genre,
-      force_ch_link_check: "",
-      fav: "0",
-      sortby: "number",
-      hd: "0",
-      p: "1"
-    }, true);
-    let data = normalizeArray(raw);
-    res.json({ ok: true, data });
+    const raw = await stalkerRequest({ type: "itv", action: "get_ordered_list", genre, force_ch_link_check: "", fav: "0", sortby: "number", hd: "0", p: "1" }, true);
+    res.json({ ok: true, data: normalizeArray(raw) });
   } catch (err) { res.json({ ok: false, error: err.message }); }
 });
 
@@ -242,28 +198,15 @@ app.get("/api/create-link", async (req, res) => {
     await ensureAuth();
     const cmd = req.query.cmd || "";
     if (!cmd) return res.json({ ok: false, error: "Missing cmd" });
-
-    const raw = await stalkerRequest({ 
-      type: req.query.type === "vod" ? "vod" : "itv", 
-      action: "create_link", 
-      cmd,
-      series: "0",
-      forced_storage: "0",
-      disable_ad: "0",
-      download: "0"
-    }, true);
-
+    const raw = await stalkerRequest({ type: req.query.type === "vod" ? "vod" : "itv", action: "create_link", cmd, series: "0", forced_storage: "0", disable_ad: "0", download: "0" }, true);
     const playUrl = extractUrl(raw);
     res.json({ ok: !!playUrl, url: playUrl });
   } catch (err) { res.json({ ok: false, error: err.message }); }
 });
 
 app.get("/api/media-library", async (req, res) => {
-  try {
-    await ensureAuth();
-    const raw = await stalkerRequest({ type: "vod", action: "get_categories" }, true);
-    res.json({ ok: true, data: normalizeArray(raw) });
-  } catch (err) { res.json({ ok: false, error: err.message }); }
+  try { await ensureAuth(); const raw = await stalkerRequest({ type: "vod", action: "get_categories" }, true); res.json({ ok: true, data: normalizeArray(raw) }); }
+  catch (err) { res.json({ ok: false, error: err.message }); }
 });
 
 app.get("/api/vod-list", async (req, res) => {
@@ -275,37 +218,61 @@ app.get("/api/vod-list", async (req, res) => {
     if (season_id) params.season_id = season_id;
     const raw = await stalkerRequest(params, true);
     let data = normalizeArray(raw);
-    
-    // Augment with TMDB posters
     data = await augmentWithTMDB(data, category === "series" ? "series" : "movie");
-    
     res.json({ ok: true, data });
   } catch (err) { res.json({ ok: false, error: err.message }); }
 });
 
+app.get("/api/series-info", async (req, res) => {
+  try {
+    await ensureAuth();
+    const movie_id = req.query.id;
+    const rawSeasons = await stalkerRequest({ type: "vod", action: "get_ordered_list", movie_id }, true);
+    const seasonsArr = normalizeArray(rawSeasons);
+    const seasons = [];
+    for (const s of seasonsArr) {
+      if (!s.id || !s.is_season) continue;
+      const rawEpisodes = await stalkerRequest({ type: "vod", action: "get_ordered_list", movie_id, season_id: s.id }, true);
+      const episodesArr = normalizeArray(rawEpisodes);
+      seasons.push({
+        id: s.id,
+        seasonNumber: parseInt(s.season_number || 1),
+        episodes: episodesArr.map(e => ({ id: e.id, episodeNumber: parseInt(e.series_number || 0), title: e.name || e.title || `Episode ${e.series_number}`, cmd: e.cmd }))
+      });
+    }
+    res.json({ ok: true, id: movie_id, seasons });
+  } catch (err) { res.json({ ok: false, error: err.message }); }
+});
+
+app.get("/api/episode-link", async (req, res) => {
+  try {
+    await ensureAuth();
+    const { series_id, season_id, episode_id } = req.query;
+    const rawEpisode = await stalkerRequest({ type: "vod", action: "get_ordered_list", movie_id: series_id, season_id, episode_id }, true);
+    const episodes = normalizeArray(rawEpisode);
+    const episode = episodes[0];
+    if (!episode || !episode.cmd) throw new Error("Missing episode command");
+    const rawLink = await stalkerRequest({ type: "vod", action: "create_link", cmd: episode.cmd, series: "2" }, true);
+    const playUrl = extractUrl(rawLink);
+    res.json({ ok: !!playUrl, url: playUrl });
+  } catch (err) { res.json({ ok: false, error: err.message }); }
+});
+
 app.get("/api/radio", async (req, res) => {
-  try {
-    await ensureAuth();
-    const raw = await stalkerRequest({ type: "radio", action: "get_categories" }, true);
-    res.json({ ok: true, data: normalizeArray(raw) });
-  } catch (err) { res.json({ ok: false, error: err.message }); }
+  try { await ensureAuth(); const raw = await stalkerRequest({ type: "radio", action: "get_categories" }, true); res.json({ ok: true, data: normalizeArray(raw) }); }
+  catch (err) { res.json({ ok: false, error: err.message }); }
 });
 
-app.get("/api/search", async (req, res) => {
-  try {
-    await ensureAuth();
-    const q = req.query.q || "";
-    const [live, vod] = await Promise.all([
-      stalkerRequest({ type: "itv", action: "get_ordered_list", search: q }, true),
-      stalkerRequest({ type: "vod", action: "get_ordered_list", search: q }, true)
-    ]);
-    res.json({ ok: true, data: [...normalizeArray(live), ...normalizeArray(vod)] });
-  } catch (err) { res.json({ ok: false, error: err.message }); }
+app.get("/api/archive-categories", async (req, res) => {
+  try { await ensureAuth(); const raw = await stalkerRequest({ type: "itv", action: "get_genres" }, true); res.json({ ok: true, data: normalizeArray(raw) }); }
+  catch (err) { res.json({ ok: false, error: err.message }); }
 });
 
-app.get("/{*path}", (req, res) => {
-  res.sendFile(path.join(distPath, "index.html"));
+app.get("/api/archive-list", async (req, res) => {
+  try { await ensureAuth(); const genre = req.query.genre || "*"; const raw = await stalkerRequest({ type: "itv", action: "get_ordered_list", genre }, true); res.json({ ok: true, data: normalizeArray(raw) }); }
+  catch (err) { res.json({ ok: false, error: err.message }); }
 });
 
+app.get("/{*path}", (req, res) => res.sendFile(path.join(distPath, "index.html")));
 app.listen(PORT, "0.0.0.0", () => console.log(`Backend on ${PORT}`));
 module.exports = app;
