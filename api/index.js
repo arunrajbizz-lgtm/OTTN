@@ -118,26 +118,47 @@ function normalizeArray(data) {
   return [];
 }
 
-function extractUrl(data) {
+/**
+ * OTT Navigator Style URL Extraction
+ * Handles tokens, relative paths, and ffmpeg prefixes
+ */
+function extractUrl(data, originalCmd = "") {
   const js = data?.js || {};
   let cmd = js.cmd || js.url || js.stream_url || js.ffmpeg_cmd || data.cmd || data.url || data.results || "";
   
-  if (typeof data?.js === "string" && data.js.startsWith("http")) cmd = data.js;
+  if (typeof data?.js === "string") cmd = data.js;
   
   let finalUrl = String(cmd).trim().replace(/^(ffmpeg|ffrt|mpv|auto)\s+/i, "").trim();
 
-  // Handle case where portal returns only a token suffix
-  if (finalUrl.startsWith("?token=") && (js.stream_url || js.url)) {
-      const base = (js.stream_url || js.url).split('?')[0];
-      finalUrl = base + finalUrl;
+  // Handle ?token=xxxx format
+  if (finalUrl.startsWith("?token=")) {
+      console.log("[Playback] Token detected, attempting resolution...");
+      let base = String(originalCmd).replace(/^(ffmpeg|ffrt|mpv|auto)\s+/i, "").trim();
+      
+      // Strategy 1: Append to original URL if it was a valid http link
+      if (base.startsWith("http")) {
+          const sep = base.includes("?") ? "&" : "?";
+          const cleanToken = finalUrl.startsWith("?") ? finalUrl.substring(1) : finalUrl;
+          return base + sep + cleanToken;
+      }
+      
+      // Strategy 2: Look for stream_url in response as base
+      if (js.stream_url && js.stream_url.includes("://")) {
+          return js.stream_url.split('?')[0] + finalUrl;
+      }
   }
 
   return finalUrl;
 }
 
-// SERIES PARSER
+/**
+ * Recursive Series Parser
+ * Discovers seasons and episodes in nested JSON structures
+ */
 function discoverEpisodes(obj, episodes = []) {
   if (!obj || typeof obj !== "object") return episodes;
+  
+  // Detection logic for episode-like objects
   if (obj.cmd && (obj.name || obj.title)) {
     episodes.push({
       id: obj.id || obj.movie_id || Math.random().toString(36).substr(2, 9),
@@ -147,8 +168,11 @@ function discoverEpisodes(obj, episodes = []) {
       cmd: obj.cmd
     });
   }
+
   for (let key in obj) {
-    if (obj[key] && typeof obj[key] === "object") discoverEpisodes(obj[key], episodes);
+    if (obj[key] && typeof obj[key] === "object") {
+      discoverEpisodes(obj[key], episodes);
+    }
   }
   return episodes;
 }
@@ -162,6 +186,30 @@ app.get("/api/connect", async (req, res) => {
     const profile = await ensureAuth();
     res.json({ ok: true, token, profile, provider: p().name });
   } catch (err) { res.json({ ok: false, error: err.message }); }
+});
+
+app.get("/api/providers", (req, res) => {
+  try {
+    const list = PROVIDERS.map((pr, i) => ({ ...pr, active: i === currentIdx }));
+    res.json({ ok: true, providers: list });
+  } catch (e) { res.json({ ok: false, error: e.message }); }
+});
+
+app.post("/api/update-provider", (req, res) => {
+  const { id, name, portal, mac, sn, deviceId, deviceId2, signature } = req.body;
+  const idx = PROVIDERS.findIndex(pr => pr.id === id);
+  if (idx === -1) return res.json({ ok: false, error: "Provider slot not found" });
+  PROVIDERS[idx] = { ...PROVIDERS[idx], name, portal, mac, sn, deviceId, deviceId2, signature };
+  res.json({ ok: true, message: "Saved" });
+});
+
+app.post("/api/select-provider", (req, res) => {
+  const { id } = req.body;
+  const idx = PROVIDERS.findIndex(pr => pr.id === id);
+  if (idx === -1) return res.json({ ok: false, error: "Provider not found" });
+  currentIdx = idx;
+  token = "";
+  res.json({ ok: true, active: p().name });
 });
 
 app.get("/api/live-categories", async (req, res) => {
@@ -195,7 +243,7 @@ app.get("/api/series-info", async (req, res) => {
     await ensureAuth();
     const movie_id = req.query.id;
     const raw = await stalkerRequest({ type: "vod", action: "get_info", movie_id, JsHttpRequest: "1-xml" }, true);
-    console.log("SERIES RAW", JSON.stringify(raw, null, 2));
+    console.log("SERIES INFO RAW", JSON.stringify(raw, null, 2));
     
     const js = raw?.js || raw;
     const allEpisodes = discoverEpisodes(js);
@@ -211,7 +259,8 @@ app.get("/api/series-info", async (req, res) => {
       episodes: seasonsMap[sNum].sort((a,b) => a.episode - b.episode)
     }));
 
-    console.log("SEASONS", JSON.stringify(seasons, null, 2));
+    console.log("SEASONS DISCOVERED", JSON.stringify(seasons, null, 2));
+
     res.json({
       ok: true,
       data: {
@@ -234,18 +283,15 @@ app.get("/api/create-link", async (req, res) => {
     
     console.log("CREATE_LINK_RESPONSE", JSON.stringify(data, null, 2));
 
-    const js = data?.js || {};
-    let rawCmd = js.cmd || js.url || js.stream_url || js.ffmpeg_cmd || data.cmd || data.url || data.results || "";
-    
-    if (typeof data?.js === "string") rawCmd = data.js;
-    
-    const playUrl = String(rawCmd).trim().replace(/^(ffmpeg|ffrt|mpv|auto)\s+/i, "").trim();
+    const playUrl = extractUrl(data, cmd);
 
-    res.json({ 
-        ok: true, 
-        url: playUrl, 
-        raw: data 
-    });
+    // Validation
+    if (!playUrl || playUrl.startsWith("?")) {
+        console.error("TOKEN RESOLUTION FAILED. RESPONSE:", JSON.stringify(data));
+        return res.json({ ok: false, token: playUrl, raw: data, error: "Token resolution failed" });
+    }
+
+    res.json({ ok: true, url: playUrl, raw: data });
   } catch (err) { res.json({ ok: false, error: err.message }); }
 });
 
@@ -271,5 +317,8 @@ app.get("/api/search", async (req, res) => {
   } catch (err) { res.json({ ok: false, error: err.message }); }
 });
 
-app.listen(PORT, "0.0.0.0", () => console.log(`Server on ${PORT}`));
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`Backend running on port ${PORT}`);
+});
+
 module.exports = app;
