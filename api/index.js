@@ -177,9 +177,14 @@ app.get("/api/series-info", async (req, res) => {
   try {
     await ensureAuth();
     const id = req.query.id;
-    const raw = await stalkerRequest({ type: "vod", action: "get_info", movie_id: id, JsHttpRequest: "1-xml" }, true);
-    const parsed = parseSeriesData(raw);
-    res.json({ ok: true, data: parsed });
+    const data = await stalkerRequest({ type: "vod", action: "get_info", movie_id: id, JsHttpRequest: "1-xml" }, true);
+    
+    console.log("SERIES_RAW", JSON.stringify(data, null, 2));
+
+    res.json({ 
+      ok: true, 
+      raw: data 
+    });
   } catch (err) { res.json({ ok: false, error: err.message }); }
 });
 
