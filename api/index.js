@@ -295,10 +295,9 @@ app.get("/api/search", async (req, res) => {
   } catch (err) { res.json({ ok: false, error: err.message }); }
 });
 
-// Catch-all to serve index.html for SPA (Express 5 compatible)
-app.get("(.*)", (req, res) => {
-  const indexPath = path.join(distPath, "index.html");
-  res.sendFile(indexPath);
+// Catch-all to serve index.html for SPA (Express 5 / path-to-regexp v8 compatible)
+app.get("/{*path}", (req, res) => {
+  res.sendFile(path.join(distPath, "index.html"));
 });
 
 app.listen(PORT, "0.0.0.0", () => console.log(`Backend on ${PORT}`));
