@@ -208,7 +208,7 @@ app.get("/api/live-channels", async (req, res) => {
   try {
     await ensureAuth();
     const genre = req.query.genre || "*";
-    const data = await stalkerRequest({ type: "itv", action: "get_ordered_list", genre, fav: "0", sortby: "number", hd: "0", p: "1", JsHttpRequest: "1-xml" }, true);
+    const data = await stalkerRequest({ type: "itv", action: "get_ordered_list", genre, fav: "0", sortby: "number", hd: "0", p: "1", num: "1000", JsHttpRequest: "1-xml" }, true);
     res.json({ ok: true, data: normalizeArray(data) });
   } catch (err) { res.json({ ok: false, error: err.message }); }
 });
@@ -236,7 +236,7 @@ app.get("/api/vod-list", async (req, res) => {
   try {
     await ensureAuth();
     const category = req.query.category || "*";
-    const data = await stalkerRequest({ type: "vod", action: "get_ordered_list", category, fav: "0", sortby: "added", JsHttpRequest: "1-xml" }, true);
+    const data = await stalkerRequest({ type: "vod", action: "get_ordered_list", category, fav: "0", sortby: "added", p: "1", num: "1000", JsHttpRequest: "1-xml" }, true);
     res.json({ ok: true, data: normalizeArray(data) });
   } catch (err) { res.json({ ok: false, error: err.message }); }
 });
@@ -246,6 +246,45 @@ app.get("/api/radio", async (req, res) => {
     await ensureAuth();
     const data = await stalkerRequest({ type: "radio", action: "get_categories", JsHttpRequest: "1-xml" }, true);
     res.json({ ok: true, data: normalizeArray(data) });
+  } catch (err) { res.json({ ok: false, error: err.message }); }
+});
+
+app.get("/api/radio-list", async (req, res) => {
+  try {
+    await ensureAuth();
+    const genre = req.query.genre || "*";
+    const data = await stalkerRequest({ type: "radio", action: "get_ordered_list", genre, JsHttpRequest: "1-xml" }, true);
+    res.json({ ok: true, data: normalizeArray(data) });
+  } catch (err) { res.json({ ok: false, error: err.message }); }
+});
+
+app.get("/api/archive-categories", async (req, res) => {
+  try {
+    await ensureAuth();
+    const data = await stalkerRequest({ type: "itv", action: "get_genres", JsHttpRequest: "1-xml" }, true);
+    res.json({ ok: true, data: normalizeArray(data) });
+  } catch (err) { res.json({ ok: false, error: err.message }); }
+});
+
+app.get("/api/archive-list", async (req, res) => {
+  try {
+    await ensureAuth();
+    const genre = req.query.genre || "*";
+    const data = await stalkerRequest({ type: "itv", action: "get_ordered_list", genre, JsHttpRequest: "1-xml" }, true);
+    res.json({ ok: true, data: normalizeArray(data) });
+  } catch (err) { res.json({ ok: false, error: err.message }); }
+});
+
+app.get("/api/search", async (req, res) => {
+  try {
+    await ensureAuth();
+    const q = req.query.q || "";
+    const [live, vod] = await Promise.all([
+      stalkerRequest({ type: "itv", action: "get_ordered_list", search: q, JsHttpRequest: "1-xml" }, true),
+      stalkerRequest({ type: "vod", action: "get_ordered_list", search: q, JsHttpRequest: "1-xml" }, true)
+    ]);
+    const results = [...normalizeArray(live), ...normalizeArray(vod)];
+    res.json({ ok: true, data: results });
   } catch (err) { res.json({ ok: false, error: err.message }); }
 });
 
