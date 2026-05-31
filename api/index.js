@@ -151,21 +151,25 @@ app.get("/api/episode-link", async (req, res) => {
     await ensureAuth();
     const { series_id, season_id, episode_id } = req.query;
     
-    // 1. Load episode to get command
+    // 1. Get exact episode metadata to obtain the 'cmd'
     const epData = await stalkerRequest({ 
       type: "vod", 
       action: "get_ordered_list", 
       movie_id: series_id, 
       season_id: season_id, 
+      episode_id: episode_id,
       JsHttpRequest: "1-xml" 
     }, true);
     
     const episodes = normalizeArray(epData);
-    const episode = episodes.find(e => String(e.id) === String(episode_id));
+    const episode = episodes[0]; // Portal returns the single requested episode in an array
     
-    if (!episode || !episode.cmd) throw new Error("Episode not found or missing command");
+    if (!episode || !episode.cmd) {
+        console.error("EPISODE_CMD_DISCOVERY_FAILED", JSON.stringify(epData));
+        throw new Error("Episode command not found in portal response");
+    }
 
-    // 2. Call create_link with series="2"
+    // 2. Call create_link with the discovered cmd and series="2"
     const params = {
       type: "vod",
       action: "create_link",
