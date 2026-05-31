@@ -4,11 +4,11 @@ import {
   Tv, Film, Radio, History, Settings as SettingsIcon, Search, Heart, 
   Play, Pause, Info, Clock, AlertCircle, ChevronRight, 
   Maximize, Volume2, Subtitles, FastForward, Rewind, Check, List, Layers, 
-  Calendar, Star, Clapperboard
+  Calendar, Star, Clapperboard, RotateCcw, RotateCw
 } from "lucide-react";
 import "./style.css";
 
-const BACKEND = ""; // Relative for production
+const BACKEND = ""; // Relative proxy for production
 
 const MENU = [
   { id: "Live streams", icon: Tv, label: "Live streams" },
@@ -58,8 +58,8 @@ const AVPlayer = {
       window.webapis.avplay.prepareAsync();
     } catch(e){ onStatus("Error: " + e.message); }
   },
-  stop: function() { if(this.isAvailable){ window.webapis.avplay.stop(); this.state = "IDLE"; } },
-  pause: function() { if(this.isAvailable && this.state === "PLAYING"){ window.webapis.avplay.pause(); this.state = "PAUSED"; } },
+  stop: function() { if(this.isAvailable){ try { window.webapis.avplay.stop(); } catch(e){} this.state = "IDLE"; } },
+  pause: function() { if(this.isAvailable && (this.state === "PLAYING" || this.state === "RESUMED")){ window.webapis.avplay.pause(); this.state = "PAUSED"; } },
   resume: function() { if(this.isAvailable && this.state === "PAUSED"){ window.webapis.avplay.play(); this.state = "PLAYING"; } },
   seek: function(ms) { if(this.isAvailable) try { window.webapis.avplay.jumpForward(ms); } catch(e){} },
   setRatio: function(m) {
@@ -89,7 +89,6 @@ function App() {
     try { return JSON.parse(localStorage.getItem("favs") || "[]"); } catch(e){ return []; }
   });
 
-  // Series Specific State
   const [seriesData, setSeriesData] = useState(null);
   const [activeSeasonIdx, setActiveSeasonIdx] = useState(0);
 
@@ -181,7 +180,6 @@ function App() {
     setStatus("Loading Series Info...");
     const j = await api(`/api/series-info?id=${item.id}`);
     if (j.ok) {
-      // Sort episodes ascending by episodeNumber
       if (j.seasons) {
         j.seasons.forEach(s => {
           if (s.episodes) s.episodes.sort((a, b) => a.episodeNumber - b.episodeNumber);
@@ -192,9 +190,7 @@ function App() {
       setFocusIndex(0);
       setActiveSeasonIdx(0);
       setStatus("Series Ready");
-    } else {
-      setStatus("Error loading series");
-    }
+    } else { setStatus("Error loading series"); }
   }, [api]);
 
   const playItem = useCallback(async (item) => {
@@ -205,6 +201,7 @@ function App() {
     const j = await api(`/api/create-link?type=${type}&cmd=${encodeURIComponent(cmdOf(item))}`);
     if (j.ok && j.url) {
       setIsPlaying(true); setIsPaused(false); setOverlay(true);
+      setNavZone("player"); setFocusIndex(0);
       AVPlayer.play(j.url, setStatus, (c, d) => setProgress({ current: c, duration: d }));
     } else { setStatus("Stream Error"); }
   }, [section, api]);
@@ -216,10 +213,9 @@ function App() {
     const j = await api(`/api/episode-link?series_id=${seriesData.id}&season_id=${season.id}&episode_id=${episode.id}`);
     if (j.ok && j.url) {
       setIsPlaying(true); setIsPaused(false); setOverlay(true);
+      setNavZone("player"); setFocusIndex(0);
       AVPlayer.play(j.url, setStatus, (c, d) => setProgress({ current: c, duration: d }));
-    } else {
-      setStatus("Episode Stream Error");
-    }
+    } else { setStatus("Episode Stream Error"); }
   }, [api, seriesData, activeSeasonIdx]);
 
   const toggleFavorite = useCallback((item) => {
@@ -249,11 +245,13 @@ function App() {
       const key = e.keyCode || e.which;
       showOverlay();
 
-      // Handle Return / Back Logic
-      if (key === 10009 || key === 27) {
+      if (key === 10009 || key === 27) { // Return / ESC
+        if (isPlaying) { 
+           AVPlayer.stop(); setIsPlaying(false); 
+           setNavZone(seriesData ? "episodes" : "items"); 
+           return; 
+        }
         if (editingProvider) { setEditingProvider(null); setFocusIndex(0); return; }
-        if (overlay && navZone === "player") { setNavZone("items"); setOverlay(false); return; }
-        if (isPlaying) { AVPlayer.stop(); setIsPlaying(false); return; }
         if (seriesData) {
           if (navZone === "episodes") { setNavZone("seasons"); setFocusIndex(activeSeasonIdx); return; }
           setSeriesData(null); setNavZone("items"); setFocusIndex(0); return;
@@ -268,33 +266,21 @@ function App() {
         return;
       }
 
-      // Media Controls
+      // Media Hardware Keys
       switch(key) {
-        case 415: case 19: case 10252: // Play/Pause
-          if (isPlaying) { isPaused ? AVPlayer.resume() : AVPlayer.pause(); setIsPaused(!isPaused); }
-          break;
-        case 413: if (isPlaying) { AVPlayer.stop(); setIsPlaying(false); } break;
-        case 412: if (isPlaying) AVPlayer.seek(-30000); break; // Rewind
-        case 417: if (isPlaying) AVPlayer.seek(30000); break;  // FF
-        case 427: // ChannelUp
-          if (navZone === "items" && section === "Live streams") {
-            const next = (focusIndex + 1) % items.length; setFocusIndex(next); playItem(items[next]);
-          }
-          break;
-        case 428: // ChannelDown
-          if (navZone === "items" && section === "Live streams") {
-            const prev = (focusIndex - 1 + items.length) % items.length; setFocusIndex(prev); playItem(items[prev]);
-          }
-          break;
-        case 31: setOverlay(true); break; // Info
-        case 403: if (navZone === "items" && items[focusIndex]) toggleFavorite(items[focusIndex]); break; // Red
-        case 406: if (isPlaying) AVPlayer.setRatio(AVPlayer.ratio === "FIT" ? "FILL" : "FIT"); break; // Blue
+        case 415: case 19: case 10252: if (isPlaying) { isPaused ? AVPlayer.resume() : AVPlayer.pause(); setIsPaused(!isPaused); } break;
+        case 413: if (isPlaying) { AVPlayer.stop(); setIsPlaying(false); setNavZone(seriesData ? "episodes" : "items"); } break;
+        case 412: if (isPlaying) AVPlayer.seek(-30000); break;
+        case 417: if (isPlaying) AVPlayer.seek(30000); break;
+        case 31: setOverlay(true); break; 
+        case 403: if (navZone === "items" && items[focusIndex]) toggleFavorite(items[focusIndex]); break;
+        case 406: if (isPlaying) AVPlayer.setRatio(AVPlayer.ratio === "FIT" ? "FILL" : "FIT"); break;
       }
 
       let max = navZone === "menu" ? MENU.length : 
                 navZone === "categories" ? (categories?.length || 0) + (section !== "Shows archive" ? 1 : 0) :
                 navZone === "items" ? (section === "Settings" ? (editingProvider ? 10 : (providers?.length || 0) + 1) : (items?.length || 0)) :
-                navZone === "player" ? 6 :
+                navZone === "player" ? 4 :
                 navZone === "seasons" ? seriesData?.seasons?.length || 0 :
                 navZone === "episodes" ? seriesData?.seasons[activeSeasonIdx]?.episodes?.length || 0 : 0;
 
@@ -327,13 +313,17 @@ function App() {
             else loadItems(categories[hasAll ? focusIndex - 1 : focusIndex]);
           } else if (navZone === "items") {
             const it = items[focusIndex];
-            if (section === "Settings") { /* existing settings logic */ } 
-            else if (it.is_series == "1" || it.is_series === true) { openSeries(it); }
+            if (it.is_series == "1" || it.is_series === true) { openSeries(it); }
             else playItem(it);
           } else if (navZone === "seasons") {
             setActiveSeasonIdx(focusIndex); setNavZone("episodes"); setFocusIndex(0);
           } else if (navZone === "episodes") {
             playEpisode(seriesData.seasons[activeSeasonIdx].episodes[focusIndex]);
+          } else if (navZone === "player") {
+            if (focusIndex === 0) { isPaused ? AVPlayer.resume() : AVPlayer.pause(); setIsPaused(!isPaused); }
+            if (focusIndex === 1) AVPlayer.seek(-30000);
+            if (focusIndex === 2) AVPlayer.seek(30000);
+            if (focusIndex === 3) setOverlay(false);
           }
           break;
       }
@@ -374,7 +364,7 @@ function App() {
               <div className={`list-row ${selectedCat?.id === "*" ? "active" : ""} ${navZone === "categories" && focusIndex === 0 ? "focused" : ""}`}>All Content</div>
             )}
             {categories.map((c, i) => (
-              <div key={i} className={`list-row ${selectedCat === c ? "active" : ""} ${navZone === "categories" && focusIndex === (section !== "Shows archive" ? i + 1 : i) ? "focused" : ""}`}>{titleOf(c)}</div>
+              <div key={i} className={`list-row ${ (selectedCat && idOf(selectedCat) === idOf(c)) ? "active" : ""} ${navZone === "categories" && focusIndex === (section !== "Shows archive" ? i + 1 : i) ? "focused" : ""}`}>{titleOf(c)}</div>
             ))}
           </div>
         </section>
@@ -399,33 +389,22 @@ function App() {
            <div className="status-badge"><Info size={14}/> {status}</div>
         </header>
 
-        <div className="player-wrapper">
-          {overlay && isPlaying && (
-            <div className={`player-overlay visible ${navZone === "player" ? "active-zone" : ""}`}>
-               <div className="stb-info-tile">
-                  <h2 className="stb-title">{titleOf(selectedItem)}</h2>
-                  <div className="stb-progress-bar"><div className="stb-progress-fill" style={{width: `${(progress.current / (progress.duration || 1)) * 100}%`}}></div></div>
-                  <div style={{display:'flex', justifyContent:'space-between', marginTop: '10px'}}><span>{formatT(progress.current)}</span><span>{formatT(progress.duration)}</span></div>
-               </div>
-            </div>
-          )}
-          {!isPlaying && !seriesData && <div className="player-empty"><Clapperboard size={80} color="#333" /><span>Select Content to Play</span></div>}
-          {seriesData && !isPlaying && (
-            <div className="series-details-hero">
-               <div className="hero-backdrop" style={{backgroundImage: `url(${thumbOf(seriesData.originalItem)})`}}></div>
-               <div className="hero-overlay">
-                  <div className="hero-content">
-                     <div className="hero-tags">
-                        <span className="tag"><Calendar size={14}/> {seriesData.originalItem.year || "2024"}</span>
-                        <span className="tag"><Star size={14} color="#f5c518" fill="#f5c518"/> {seriesData.originalItem.rating || "8.5"}</span>
-                        <span className="tag hd">4K Ultra HD</span>
-                     </div>
-                     <p className="hero-plot">{seriesData.originalItem.description || seriesData.originalItem.info || "Discover the intense journey in this acclaimed series. Now streaming in high definition."}</p>
-                  </div>
-               </div>
-            </div>
-          )}
-        </div>
+        {seriesData && !isPlaying && (
+          <div className="series-details-hero">
+              <div className="hero-backdrop" style={{backgroundImage: `url(${thumbOf(seriesData.originalItem)})`}}></div>
+              <img src={thumbOf(seriesData.originalItem)} className="hero-poster" alt="" />
+              <div className="hero-overlay">
+                <div className="hero-content">
+                    <div className="hero-tags">
+                      <span className="tag"><Calendar size={14}/> {seriesData.originalItem.year || "2024"}</span>
+                      <span className="tag"><Star size={14} color="#f5c518" fill="#f5c518"/> {seriesData.originalItem.rating || "8.5"}</span>
+                      <span className="tag hd">4K Ultra HD</span>
+                    </div>
+                    <p className="hero-plot">{seriesData.originalItem.description || seriesData.originalItem.info || "Discover the intense journey in this acclaimed series. Now streaming in high definition."}</p>
+                </div>
+              </div>
+          </div>
+        )}
 
         <div className={`items-container ${(section === "Live streams" || seriesData) ? "list-mode" : "grid-mode"}`}>
           {seriesData ? (
@@ -441,7 +420,7 @@ function App() {
             ))
           ) : (
             (items || []).map((it, i) => (
-              <div key={i} className={`item-card ${selectedItem === it ? "active" : ""} ${navZone === "items" && focusIndex === i ? "focused" : ""}`}>
+              <div key={i} className={`item-card ${ (selectedItem && idOf(selectedItem) === idOf(it)) ? "active" : ""} ${navZone === "items" && focusIndex === i ? "focused" : ""}`}>
                  {it.is_series == "1" || it.is_series === true ? (
                    <div className="card-inner">
                       <img src={thumbOf(it)} alt="" />
@@ -458,6 +437,28 @@ function App() {
           )}
         </div>
       </main>
+
+      {/* Full-Screen Player UI Overlay */}
+      <div className={`full-player-ui ${isPlaying && overlay ? "visible" : ""}`}>
+          <div className="player-controls">
+              <h1 className="player-title">{titleOf(selectedItem)}</h1>
+              <div className="player-progress-container">
+                  <div className="progress-track">
+                      <div className="progress-fill" style={{width: `${(progress.current / (progress.duration || 1)) * 100}%`}}></div>
+                  </div>
+                  <div className="player-times">
+                      <span>{formatT(progress.current)}</span>
+                      <span>{formatT(progress.duration)}</span>
+                  </div>
+              </div>
+              <div className="player-actions">
+                  <div className={`player-btn ${navZone === "player" && focusIndex === 0 ? "focused" : ""}`}>{isPaused ? <Play size={60} fill="white"/> : <Pause size={60} fill="white"/>}</div>
+                  <div className={`player-btn ${navZone === "player" && focusIndex === 1 ? "focused" : ""}`}><RotateCcw size={50} /></div>
+                  <div className={`player-btn ${navZone === "player" && focusIndex === 2 ? "focused" : ""}`}><RotateCw size={50} /></div>
+                  <div className={`player-btn ${navZone === "player" && focusIndex === 3 ? "focused" : ""}`}><Maximize size={50} /></div>
+              </div>
+          </div>
+      </div>
     </div>
   );
 }
