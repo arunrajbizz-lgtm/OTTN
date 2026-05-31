@@ -59,8 +59,9 @@ function getHeaders(useAuth = false) {
 }
 
 async function stalkerRequest(params, useAuth = false) {
+  const url = `${p().portal}/server/load.php`;
   try {
-    const res = await axios.get(`${p().portal}/server/load.php`, {
+    const res = await axios.get(url, {
       params,
       headers: getHeaders(useAuth),
       timeout: 30000,
@@ -68,11 +69,17 @@ async function stalkerRequest(params, useAuth = false) {
     });
     let data = res.data;
     if (typeof data === "string") {
-      try { data = JSON.parse(data.trim()); } catch (e) { data = { raw_text: data }; }
+      const trimmed = data.trim();
+      try { 
+        data = JSON.parse(trimmed); 
+      } catch (e) { 
+        console.warn(`[Portal] Failed to parse JSON from ${params.action}. Raw sample: ${trimmed.substring(0, 100)}`);
+        data = { raw_text: trimmed }; 
+      }
     }
     return data;
   } catch (err) {
-    console.error(`[Portal] Error:`, err.message);
+    console.error(`[Portal] Request Error (${url}):`, err.message);
     throw err;
   }
 }
@@ -88,7 +95,7 @@ async function doHandshake() {
     JsHttpRequest: "1-xml" 
   };
   let data = await stalkerRequest(handshakeParams);
-  if (!data || data.js === false || !data.js?.token) {
+  if (!data || data.js === false || (!data.js?.token && !data?.token)) {
       console.warn("[Handshake] Strategy 1 failed or returned no token, trying Strategy 2...");
       data = await stalkerRequest({ type: "stb", action: "handshake", token: "" });
   }
@@ -119,7 +126,10 @@ async function getProfile() {
     metrics: JSON.stringify({ mac: p().mac, sn: p().sn, model: "MAG250", uid: p().deviceId, random: randomValue }),
     JsHttpRequest: "1-xml",
   }, true);
-  console.log(`[Profile] Result for ${p().name}: ${data?.js ? "OK" : "FAILED"}`);
+  
+  const ok = data?.js || data?.id || data?.data;
+  console.log(`[Profile] Result for ${p().name}: ${ok ? "OK" : "FAILED"}`);
+  if (!ok) console.warn("[Profile] Response was unexpected:", JSON.stringify(data).substring(0, 200));
   return data;
 }
 
@@ -134,11 +144,17 @@ function normalizeArray(data) {
   if (Array.isArray(data?.js)) return data.js;
   if (Array.isArray(data?.js?.data)) return data.js.data;
   if (Array.isArray(data?.data)) return data.data;
+  if (typeof data?.js === 'object' && data.js !== null) return Object.values(data.js).filter(x => typeof x === 'object');
   return [];
 }
 
 app.use((req, res, next) => {
   console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
+  const oldJson = res.json;
+  res.json = function(data) {
+    console.log(`[${new Date().toISOString()}] ${req.method} ${req.url} -> ${data.ok ? "SUCCESS" : "ERROR: " + (data.error || "unknown")}`);
+    return oldJson.apply(res, arguments);
+  };
   next();
 });
 
