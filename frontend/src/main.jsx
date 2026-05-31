@@ -5,14 +5,16 @@ import {
   Film, 
   Radio, 
   History, 
-  Settings, 
+  Settings as SettingsIcon, 
   Search, 
   Heart, 
   Play, 
   Info,
   Clock,
   Star,
-  AlertCircle
+  AlertCircle,
+  ChevronRight,
+  Layout
 } from "lucide-react";
 import "./style.css";
 
@@ -146,6 +148,11 @@ function App() {
   }, []);
 
   const [editingProvider, setEditingProvider] = useState(null);
+
+  const fetchProviders = async () => {
+    const j = await api("/api/providers");
+    if (j.ok) setProviders(j.providers);
+  };
 
   const saveProvider = async (p) => {
     setStatus("Saving...");
@@ -364,10 +371,13 @@ function App() {
       // Navigation counts
       let count = 0;
       if (navZone === "menu") count = MENU.length;
-      if (navZone === "categories") count = categories.length + (section !== "Shows archive" ? 1 : 0);
+      if (navZone === "categories") count = (categories?.length || 0) + (section !== "Shows archive" ? 1 : 0);
       if (navZone === "items") {
-        if (section === "Settings") count = providers.length + 1; // Providers + Refresh button
-        else count = items.length;
+        if (section === "Settings") {
+          count = editingProvider ? 10 : (providers?.length || 0) + 1;
+        } else {
+          count = items?.length || 0;
+        }
       }
 
       // Official Remote Key Handling
@@ -403,12 +413,14 @@ function App() {
           break;
         case 37: // Left
           if (navZone !== "menu") {
-            setNavZone(navZone === "items" && section !== "Favorites" ? "categories" : "menu");
+            setNavZone(navZone === "items" && section !== "Favorites" && section !== "Settings" ? "categories" : "menu");
           }
           break;
         case 39: // Right
-          if (navZone === "menu" && categories.length > 0) setNavZone("categories");
-          else if (navZone === "categories" && items.length > 0) setNavZone("items");
+          if (navZone === "menu" && (categories?.length > 0 || section === "Settings")) {
+            setNavZone(section === "Settings" ? "items" : "categories");
+          }
+          else if (navZone === "categories" && (items?.length > 0)) setNavZone("items");
           break;
         case 13: // Enter
           if (navZone === "menu") loadSection(MENU[focusIndex].id);
@@ -422,10 +434,19 @@ function App() {
             }
           } else if (navZone === "items") {
             if (section === "Settings") {
-              if (focusIndex === 0) forceReload();
-              else {
-                const pr = providers[focusIndex - 1];
-                if (pr) selectProvider(pr.id);
+              if (!editingProvider) {
+                if (focusIndex === 0) forceReload();
+                else {
+                  const pr = providers[focusIndex - 1];
+                  if (pr) startEditing(pr);
+                }
+              } else {
+                if (focusIndex < 7) {
+                  const fields = ["name", "portal", "mac", "sn", "deviceId", "deviceId2", "signature"];
+                  handleProviderInput(fields[focusIndex], editingProvider[fields[focusIndex]]);
+                } else if (focusIndex === 7) saveProvider(editingProvider);
+                else if (focusIndex === 8) saveProvider(editingProvider).then(() => selectProvider(editingProvider.id));
+                else if (focusIndex === 9) setEditingProvider(null);
               }
             } else {
               playItem(items[focusIndex]);
@@ -440,7 +461,7 @@ function App() {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [navZone, focusIndex, categories, items, section, selectedCat, favorites, loadSection, loadItems, playItem, isPlaying, toggleFavorite]);
+  }, [navZone, focusIndex, categories, items, section, selectedCat, favorites, loadSection, loadItems, playItem, isPlaying, toggleFavorite, editingProvider, providers]);
 
   return (
     <div className={`app-shell ${isPlaying ? "video-playing" : ""}`}>
@@ -465,7 +486,7 @@ function App() {
       </nav>
 
       {/* Categories */}
-      {categories.length > 0 && (
+      {categories?.length > 0 && (
         <section className={`cat-panel ${navZone === "categories" ? "active-zone" : ""}`}>
           <div className="panel-header"><h3>Categories</h3></div>
           <div className="scroll-list">
@@ -488,9 +509,9 @@ function App() {
         <header className="main-header">
           <div className="header-info">
             <h1>{section === "Favorites" ? "My List" : (selectedCat ? titleOf(selectedCat) : section)}</h1>
-            <div className={`status-badge ${status.includes("Error") ? "error" : ""}`}>
-              {status.includes("Error") ? <AlertCircle size={14}/> : <Info size={14}/>}
-              {status}
+            <div className={`status-badge ${(status && status.includes("Error")) ? "error" : ""}`}>
+              {(status && status.includes("Error")) ? <AlertCircle size={14}/> : <Info size={14}/>}
+              {status || "Ready"}
             </div>
           </div>
         </header>
@@ -533,10 +554,10 @@ function App() {
                </div>
 
                <h3 style={{margin: '40px 0 20px', color: '#666', textTransform: 'uppercase', fontSize: '18px'}}>Portal Configuration</h3>
-               {providers.map((p, i) => (
+               {(providers || []).map((p, i) => (
                  <div 
-                   key={p.id}
-                   className={`item-card list-mode ${p.active ? "active" : ""} ${navZone === "items" && focusIndex === (i + 1) ? "focused" : ""}`}
+                   key={p.id || i}
+                   className={`item-card list-mode ${(p && p.active) ? "active" : ""} ${navZone === "items" && focusIndex === (i + 1) ? "focused" : ""}`}
                    onClick={() => startEditing(p)}
                  >
                    <span className="row-title">{p.name || `Provider ${i+1}`}</span>
@@ -549,7 +570,7 @@ function App() {
                ))}
 
                <div className="status-badge info" style={{marginTop: '40px'}}>
-                 Version 1.4.0 - Advanced Configuration Enabled
+                 Version 1.4.1 - System Hardened
                </div>
              </div>
           )}
