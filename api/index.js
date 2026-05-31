@@ -243,5 +243,26 @@ app.get("/api/search", async (req, res) => {
   } catch (err) { res.json({ ok: false, error: err.message }); }
 });
 
+app.get("/api/episode-debug", async (req, res) => {
+  try {
+    await ensureAuth();
+    const { series_id, season_id, episode_id } = req.query;
+    
+    const [test1, test2, test3, test4] = await Promise.all([
+      stalkerRequest({ type: "vod", action: "get_ordered_list", movie_id: series_id, season_id: season_id, episode_id: episode_id, JsHttpRequest: "1-xml" }, true),
+      stalkerRequest({ type: "vod", action: "get_info", movie_id: episode_id, JsHttpRequest: "1-xml" }, true),
+      stalkerRequest({ type: "vod", action: "create_link", cmd: `/media/${episode_id}.mpg`, series: "2", JsHttpRequest: "1-xml" }, true),
+      stalkerRequest({ type: "vod", action: "get_ordered_list", movie_id: series_id, season_id: season_id, force_ch_link_check: "1", JsHttpRequest: "1-xml" }, true)
+    ]);
+
+    console.log("EPISODE DEBUG TEST 1", JSON.stringify(test1, null, 2));
+    console.log("EPISODE DEBUG TEST 2", JSON.stringify(test2, null, 2));
+    console.log("EPISODE DEBUG TEST 3", JSON.stringify(test3, null, 2));
+    console.log("EPISODE DEBUG TEST 4", JSON.stringify(test4, null, 2));
+
+    res.json({ ok: true, test1, test2, test3, test4 });
+  } catch (err) { res.json({ ok: false, error: err.message }); }
+});
+
 app.listen(PORT, "0.0.0.0", () => console.log(`Server on ${PORT}`));
 module.exports = app;
