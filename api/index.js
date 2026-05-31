@@ -84,29 +84,39 @@ async function stalkerRequest(params, useAuth = false, customHeaders = null) {
 async function doHandshake() {
   console.log(`[Auth] Handshake Start for ${p().name}...`);
   
-  // Strategy 1: Standard Stalker Handshake
-  let data = await stalkerRequest({ 
+  const handshakeParams = { 
     type: "stb", 
     action: "handshake", 
     token: "", 
+    mac: p().mac,
+    stb_type: "MAG250",
     JsHttpRequest: "1-xml" 
-  });
+  };
+
+  // Strategy 1: Modern Handshake
+  let data = await stalkerRequest(handshakeParams);
   
-  // Strategy 2: Fallback to plain handshake if failed
-  if (!data || data.js === false || data.error) {
-      console.warn(`[Auth] Strategy 1 failed, trying fallback...`);
-      data = await stalkerRequest({ 
-        type: "stb", 
-        action: "handshake"
-      });
+  // Strategy 2: Legacy Handshake
+  if (!data || data.js === false || !data.js?.token) {
+      console.warn(`[Auth] Strategy 1 failed, trying Strategy 2...`);
+      data = await stalkerRequest({ type: "stb", action: "handshake", token: "" });
   }
 
-  console.log(`[Auth] Response:`, JSON.stringify(data));
+  // Strategy 3: Minimal Handshake
+  if (!data || data.js === false || !data.js?.token) {
+      console.warn(`[Auth] Strategy 2 failed, trying Strategy 3...`);
+      data = await stalkerRequest({ action: "handshake" });
+  }
+
+  console.log(`[Auth] Handshake Final Result:`, JSON.stringify(data));
 
   token = data?.js?.token || data?.token || data?.results?.token || "";
   randomValue = data?.js?.random || data?.random || data?.results?.random || "";
   
-  if (!token) throw new Error("Handshake failed");
+  if (!token) {
+    const errData = JSON.stringify(data);
+    throw new Error(`Handshake failed. Portal returned: ${errData.substring(0, 100)}`);
+  }
   
   console.log(`[Auth] Token OK: ${token.substring(0, 6)}...`);
   return data;
