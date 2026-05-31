@@ -56,6 +56,7 @@ function getHeaders(useAuth = false) {
 }
 
 async function stalkerRequest(params, useAuth = false) {
+  const action = params.action || params.type;
   try {
     const res = await axios.get(`${p().portal}/server/load.php`, {
       params,
@@ -63,18 +64,39 @@ async function stalkerRequest(params, useAuth = false) {
       timeout: 30000,
       validateStatus: () => true,
     });
-    return res.data;
+
+    let data = res.data;
+    if (typeof data === "string") {
+      const trimmed = data.trim();
+      if (trimmed.startsWith("<")) {
+        console.error(`[Portal] ${p().name} returned HTML (Blocked?)`);
+        throw new Error("Portal returned HTML");
+      }
+      try {
+        data = JSON.parse(trimmed);
+      } catch (e) {
+        console.warn(`[Portal] ${p().name} returned non-JSON string: ${trimmed.substring(0, 100)}`);
+        data = { raw_text: trimmed };
+      }
+    }
+    return data;
   } catch (err) {
-    console.error(`[Portal] ${p().name} Request Error:`, err.message);
+    console.error(`[Portal] ${p().name} Request Error (${action}):`, err.message);
     throw err;
   }
 }
 
 async function doHandshake() {
+  console.log(`[Auth] ${p().name} Handshake Start...`);
   const data = await stalkerRequest({ type: "stb", action: "handshake", token: "", JsHttpRequest: "1-xml" });
-  token = data?.js?.token || "";
-  randomValue = data?.js?.random || "";
-  if (!token) throw new Error("Handshake failed");
+  token = data?.js?.token || data?.token || "";
+  randomValue = data?.js?.random || data?.random || "";
+  
+  if (!token) {
+    console.error(`[Auth] ${p().name} Handshake Failed. Response:`, JSON.stringify(data));
+    throw new Error("Handshake failed");
+  }
+  console.log(`[Auth] ${p().name} Handshake Success`);
   return data;
 }
 
@@ -140,10 +162,14 @@ app.get("/api/test-portal", async (req, res) => {
 });
 
 app.get("/api/providers", (req, res) => {
+  console.log("[Route] GET /api/providers");
   try {
     const list = PROVIDERS.map((pr, i) => ({ ...pr, active: i === currentIdx }));
     res.json({ ok: true, providers: list });
-  } catch (e) { res.json({ ok: false, error: e.message }); }
+  } catch (e) {
+    console.error("[Route] providers error:", e.message);
+    res.json({ ok: false, error: e.message });
+  }
 });
 
 app.post("/api/update-provider", (req, res) => {
@@ -228,17 +254,6 @@ app.get("/api/tmdb/search", async (req, res) => {
     const title = req.query.title;
     if (!title || !TMDB_API_KEY) return res.json({ ok: false });
     const response = await axios.get("https://api.themoviedb.org/3/search/movie", { params: { api_key: TMDB_API_KEY, query: title } });
-    const movie = response.data.results?.[0];
-    if (!movie) return res.json({ ok: false });
-    res.json({ ok: true, title: movie.title, overview: movie.overview, rating: movie.vote_average, poster: movie.poster_path ? `https://image.tmdb.org/t/p/w500${movie.poster_path}` : "" });
-  } catch (e) { res.json({ ok: false }); }
-});
-
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(`Backend running on port ${PORT}`);
-});
-
-module.exports = app;B_API_KEY, query: title } });
     const movie = response.data.results?.[0];
     if (!movie) return res.json({ ok: false });
     res.json({ ok: true, title: movie.title, overview: movie.overview, rating: movie.vote_average, poster: movie.poster_path ? `https://image.tmdb.org/t/p/w500${movie.poster_path}` : "" });
