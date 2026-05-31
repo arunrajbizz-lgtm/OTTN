@@ -9,12 +9,19 @@ import {
   Search, 
   Heart, 
   Play, 
+  Pause,
   Info,
   Clock,
   Star,
   AlertCircle,
   ChevronRight,
-  Layout
+  Maximize,
+  Volume2,
+  Subtitles,
+  FastForward,
+  Rewind,
+  RotateCcw,
+  Check
 } from "lucide-react";
 import "./style.css";
 
@@ -36,72 +43,98 @@ const cmdOf = (x) => x?.cmd || x?.cmd_1 || x?.url || x?.stream_url || x?.file ||
 const thumbOf = (it) => it?.screenshot || it?.logo || it?.tv_genre_logo || "";
 
 /**
- * Samsung AVPlay Utility
+ * Advanced Samsung AVPlay Utility
  */
 const AVPlayer = {
   isAvailable: !!(window.webapis && window.webapis.avplay),
+  state: "IDLE",
+  aspectRatio: "FIT", // FIT, FILL, STRETCH
   
   init: function() {
     if (!this.isAvailable) return;
     try {
-      // Official key registration
       const keys = ["MediaPlay", "MediaPause", "MediaStop", "MediaRewind", "MediaFastForward"];
       keys.forEach(key => {
-        try {
-          window.tizen.tvinputdevice.registerKey(key);
-        } catch(e) {}
+        try { window.tizen.tvinputdevice.registerKey(key); } catch(e) {}
       });
-    } catch (e) {
-      console.error("AVPlayer Init Error", e);
-    }
+    } catch (e) { console.error("AVPlayer Init Error", e); }
   },
 
-  play: function(url, onStatus) {
-    if (!this.isAvailable) {
-      console.warn("AVPlay not available, falling back to log");
-      return;
-    }
-
+  play: function(url, onStatus, onProgress) {
+    if (!this.isAvailable) return;
     try {
-      window.webapis.avplay.stop();
+      this.stop();
       window.webapis.avplay.open(url);
+      this.setAspectRatio(this.aspectRatio);
       
-      // Full screen by default or use specific rect
-      window.webapis.avplay.setDisplayRect(0, 0, 1920, 1080);
-      
-      // Advanced Listener
       window.webapis.avplay.setListener({
         onbufferingstart: () => onStatus("Buffering..."),
         onbufferingcomplete: () => onStatus("Playing"),
-        onstreamcompleted: () => onStatus("Finished"),
-        onerror: (err) => onStatus("AVPlay Error: " + err),
+        onstreamcompleted: () => { this.state = "COMPLETED"; onStatus("Finished"); },
+        onerror: (err) => onStatus("Playback Error"),
         onpreparecomplete: () => {
           window.webapis.avplay.play();
+          this.state = "PLAYING";
+        },
+        oncurrentplaytime: (time) => {
+          const duration = window.webapis.avplay.getDuration();
+          onProgress(time, duration);
         }
       });
 
-      // Optimized for Stalker Streams
       window.webapis.avplay.prepareAsync();
-    } catch (e) {
-      onStatus("AVPlay Exception: " + e.message);
-    }
+    } catch (e) { onStatus("Exception: " + e.message); }
   },
 
   stop: function() {
-    if (this.isAvailable) window.webapis.avplay.stop();
+    if (this.isAvailable) {
+      window.webapis.avplay.stop();
+      this.state = "IDLE";
+    }
   },
 
   pause: function() {
-    if (this.isAvailable) window.webapis.avplay.pause();
+    if (this.isAvailable && this.state === "PLAYING") {
+      window.webapis.avplay.pause();
+      this.state = "PAUSED";
+    }
   },
 
   resume: function() {
-    if (this.isAvailable) window.webapis.avplay.play();
+    if (this.isAvailable && this.state === "PAUSED") {
+      window.webapis.avplay.play();
+      this.state = "PLAYING";
+    }
+  },
+
+  seek: function(ms) {
+    if (!this.isAvailable) return;
+    try { window.webapis.avplay.jumpForward(ms); } catch(e) { console.error("Seek Error", e); }
+  },
+
+  setAspectRatio: function(mode) {
+    if (!this.isAvailable) return;
+    this.aspectRatio = mode;
+    try {
+      if (mode === "FIT") window.webapis.avplay.setDisplayRect(0, 0, 1920, 1080);
+      else if (mode === "FILL") window.webapis.avplay.setDisplayRect(0, 0, 1920, 1080); // In Tizen this often requires different logic but we'll use rect for now
+      // Advanced: window.webapis.avplay.setStretchMode("STRETCH_FULL");
+    } catch(e) {}
+  },
+
+  getAudioTracks: function() {
+    if (!this.isAvailable) return [];
+    try { return window.webapis.avplay.getTotalTrackInfo(); } catch(e) { return []; }
+  },
+
+  setAudioTrack: function(id) {
+    if (!this.isAvailable) return;
+    try { window.webapis.avplay.setSelectTrack("AUDIO", id); } catch(e) {}
   }
 };
 
 /**
- * Persistent Cache Utility
+ * Cache Utility
  */
 const Cache = {
   get: (key) => {
@@ -111,9 +144,7 @@ const Cache = {
     } catch(e) { return null; }
   },
   set: (key, val) => {
-    try {
-      localStorage.setItem(`cache_${key}`, JSON.stringify(val));
-    } catch(e) {}
+    try { localStorage.setItem(`cache_${key}`, JSON.stringify(val)); } catch(e) {}
   },
   clear: () => {
     Object.keys(localStorage).forEach(k => {
@@ -123,6 +154,7 @@ const Cache = {
 };
 
 function App() {
+  // UI State
   const [section, setSection] = useState("Live streams");
   const [categories, setCategories] = useState([]);
   const [items, setItems] = useState([]);
@@ -131,10 +163,16 @@ function App() {
   const [status, setStatus] = useState("Ready");
   const [isPlaying, setIsPlaying] = useState(false);
   const [favorites, setFavorites] = useState(() => JSON.parse(localStorage.getItem("favs") || "[]"));
-  
-  // TMDB Data
-  const [tmdbData, setTmdbData] = useState(null);
   const [providers, setProviders] = useState([]);
+  const [editingProvider, setEditingProvider] = useState(null);
+
+  // Player State
+  const [overlayVisible, setPlayerOverlay] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [isPaused, setIsPaused] = useState(false);
+  const [audioTracks, setAudioTracks] = useState([]);
+  const overlayTimer = useRef(null);
 
   // Focus Management
   const [navZone, setNavZone] = useState("menu");
@@ -147,7 +185,17 @@ function App() {
     fetchProviders();
   }, []);
 
-  const [editingProvider, setEditingProvider] = useState(null);
+  const showOverlay = useCallback(() => {
+    setPlayerOverlay(true);
+    if (overlayTimer.current) clearTimeout(overlayTimer.current);
+    overlayTimer.current = setTimeout(() => {
+      if (navZone === "player") {
+         // Keep visible if focused
+      } else {
+         setPlayerOverlay(false);
+      }
+    }, 5000);
+  }, [navZone]);
 
   const fetchProviders = async () => {
     const j = await api("/api/providers");
@@ -173,13 +221,11 @@ function App() {
 
   const handleProviderInput = (field, currentVal) => {
     const val = prompt(`Enter ${field}:`, currentVal || "");
-    if (val !== null) {
-      setEditingProvider(prev => ({ ...prev, [field]: val }));
-    }
+    if (val !== null) setEditingProvider(prev => ({ ...prev, [field]: val }));
   };
 
   const selectProvider = async (id) => {
-    setStatus("Switching provider...");
+    setStatus("Switching...");
     try {
       const r = await fetch(BACKEND + "/api/select-provider", {
         method: "POST",
@@ -191,8 +237,6 @@ function App() {
         Cache.clear();
         await fetchProviders();
         loadSection(section);
-      } else {
-        setStatus("Switch Error: " + j.error);
       }
     } catch(e) { setStatus("Switch Failed"); }
   };
@@ -202,16 +246,6 @@ function App() {
     setNavZone("items");
     setFocusIndex(0);
   };
-
-  const getFocusKey = useCallback(() => {
-    const catId = selectedCat ? idOf(selectedCat) : "none";
-    return `${section}|${navZone}|${catId}`;
-  }, [section, navZone, selectedCat]);
-
-  const rememberFocus = useCallback(() => {
-    const key = getFocusKey();
-    lastFocusMemory.current[key] = focusIndex;
-  }, [getFocusKey, focusIndex]);
 
   const restoreFocus = useCallback((zone, sec, cat) => {
     const catId = cat ? idOf(cat) : "none";
@@ -223,15 +257,11 @@ function App() {
   async function api(path) {
     try {
       const r = await fetch(BACKEND + path);
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
       return await r.json();
-    } catch (e) {
-      return { ok: false, error: e.message };
-    }
+    } catch (e) { return { ok: false, error: e.message }; }
   }
 
   const loadSection = useCallback(async (sec) => {
-    rememberFocus();
     setSection(sec);
     setCategories([]);
     setItems([]);
@@ -240,35 +270,14 @@ function App() {
     setIsPlaying(false);
     AVPlayer.stop();
     setStatus("Ready");
-    setTmdbData(null);
 
-    if (sec === "Settings") {
-      setNavZone("items");
-      setFocusIndex(0);
-      setStatus("Settings Menu");
-      return;
-    }
+    if (sec === "Settings") { setNavZone("items"); setFocusIndex(0); return; }
+    if (sec === "Favorites") { setItems(favorites); setNavZone("items"); setFocusIndex(0); return; }
+    if (sec === "Search") { setNavZone("items"); setFocusIndex(0); return; }
 
-    if (sec === "Favorites") {
-      setItems(favorites);
-      setNavZone("items");
-      setFocusIndex(0);
-      setStatus(`My List (${favorites.length})`);
-      return;
-    }
-
-    if (sec === "Search") {
-      setNavZone("items");
-      setFocusIndex(0);
-      setStatus("Search Content");
-      return;
-    }
-
-    // Check Cache
     const cachedCats = Cache.get(`cats_${sec}`);
     if (cachedCats) {
       setCategories(cachedCats);
-      setStatus(`${sec} (Cached)`);
       setNavZone("categories");
       restoreFocus("categories", sec, null);
       return;
@@ -283,28 +292,22 @@ function App() {
     if (!j.ok) return setStatus("Error: " + j.error);
     const arr = j.data || [];
     setCategories(arr);
-    Cache.set(`cats_${sec}`, arr); // Store in cache
-    setStatus(`${sec} - ${arr.length} categories`);
-    
+    Cache.set(`cats_${sec}`, arr);
     setNavZone("categories");
     restoreFocus("categories", sec, null);
-  }, [favorites, rememberFocus, restoreFocus]);
+  }, [favorites, restoreFocus]);
 
   const loadItems = useCallback(async (cat) => {
-    rememberFocus();
     setSelectedCat(cat);
     setItems([]);
     setSelectedItem(null);
-    setStatus("Fetching content...");
+    setStatus("Loading...");
 
     const id = idOf(cat);
     const cacheKey = `items_${section}_${id}`;
-
-    // Check Cache
     const cachedItems = Cache.get(cacheKey);
     if (cachedItems) {
       setItems(cachedItems);
-      setStatus(`${titleOf(cat)} (Cached)`);
       setNavZone("items");
       restoreFocus("items", section, cat);
       return;
@@ -319,15 +322,12 @@ function App() {
     if (!j.ok) return setStatus("Error: " + j.error);
     const arr = j.data || [];
     setItems(arr);
-    Cache.set(cacheKey, arr); // Store in cache
-    setStatus(`${titleOf(cat)} - ${arr.length} items`);
-    
+    Cache.set(cacheKey, arr);
     setNavZone("items");
     restoreFocus("items", section, cat);
-  }, [section, rememberFocus, restoreFocus]);
+  }, [section, restoreFocus]);
 
   const forceReload = useCallback(() => {
-    setStatus("Refreshing data...");
     Cache.clear();
     loadSection(section);
   }, [section, loadSection]);
@@ -341,19 +341,17 @@ function App() {
 
     let type = "itv";
     if (section === "Media library") type = "vod";
-    if (section === "Radio stations") type = "radio";
-
     const j = await api(`/api/create-link?type=${type}&cmd=${encodeURIComponent(cmd)}`);
     if (!j.ok || !j.url) return setStatus(j.error || "Link failed");
     
     setIsPlaying(true);
-    AVPlayer.play(j.url, (msg) => setStatus(msg));
-
-    if (section === "Media library") {
-      const info = await api(`/api/tmdb/search?title=${encodeURIComponent(titleOf(item))}`);
-      if (info.ok) setTmdbData(info);
-    }
-  }, [section]);
+    setIsPaused(false);
+    showOverlay();
+    AVPlayer.play(j.url, (msg) => setStatus(msg), (time, dur) => {
+      setCurrentTime(time);
+      setDuration(dur);
+    });
+  }, [section, showOverlay]);
 
   const toggleFavorite = useCallback((item) => {
     const isFav = favorites.find(f => idOf(f) === idOf(item));
@@ -362,49 +360,35 @@ function App() {
     localStorage.setItem("favs", JSON.stringify(newFavs));
   }, [favorites]);
 
-  // Remote Support Logic
+  // Remote Handlers
   useEffect(() => {
     const handleKeyDown = (e) => {
       const key = e.keyCode || e.which;
       const keyName = e.keyName || "";
+      showOverlay();
 
-      // Navigation counts
       let count = 0;
       if (navZone === "menu") count = MENU.length;
       if (navZone === "categories") count = (categories?.length || 0) + (section !== "Shows archive" ? 1 : 0);
       if (navZone === "items") {
-        if (section === "Settings") {
-          count = editingProvider ? 10 : (providers?.length || 0) + 1;
-        } else {
-          count = items?.length || 0;
-        }
+        if (section === "Settings") count = editingProvider ? 10 : (providers?.length || 0) + 1;
+        else count = items?.length || 0;
       }
+      if (navZone === "player") count = 6; // Play, Rew, Fwd, Aspect, Audio, CC
 
-      // Official Remote Key Handling
-      if (key === 10009 || key === 27) { // Back
-        if (isPlaying) {
-          setIsPlaying(false);
-          AVPlayer.stop();
-          return;
-        }
-        if (navZone === "items") {
-          setNavZone(section === "Favorites" ? "menu" : "categories");
-          restoreFocus(navZone, section, selectedCat);
-        } else if (navZone === "categories") {
-          setNavZone("menu");
-        }
+      // Back / Exit
+      if (key === 10009 || key === 27) {
+        if (navZone === "player") { setNavZone("items"); setPlayerOverlay(false); return; }
+        if (isPlaying) { setIsPlaying(false); AVPlayer.stop(); return; }
+        if (navZone === "items") setNavZone(section === "Favorites" ? "menu" : "categories");
+        else if (navZone === "categories") setNavZone("menu");
         return;
       }
 
       // Media Keys
-      if (key === 415 || keyName === "MediaPlay") AVPlayer.resume();
-      if (key === 19 || keyName === "MediaPause") AVPlayer.pause();
-      if (key === 413 || keyName === "MediaStop") {
-        AVPlayer.stop();
-        setIsPlaying(false);
-      }
+      if (key === 415 || keyName === "MediaPlay") { AVPlayer.resume(); setIsPaused(false); }
+      if (key === 19 || keyName === "MediaPause") { AVPlayer.pause(); setIsPaused(true); }
 
-      // Remote Control Navigation
       switch (key) {
         case 38: // Up
           setFocusIndex(p => Math.max(0, p - 1));
@@ -413,64 +397,39 @@ function App() {
           setFocusIndex(p => Math.min(count - 1, p + 1));
           break;
         case 37: // Left
-          if (navZone === "items") {
-            if (section === "Settings" || section === "Favorites" || section === "Search") {
-              setNavZone("menu");
-              restoreFocus("menu", section, null);
-            } else {
-              setNavZone("categories");
-              restoreFocus("categories", section, selectedCat);
-            }
-          } else if (navZone === "categories") {
-            setNavZone("menu");
-            restoreFocus("menu", section, null);
-          }
+          if (navZone === "items") setNavZone(section === "Favorites" ? "menu" : "categories");
+          else if (navZone === "categories" || navZone === "player") setNavZone("menu");
           break;
         case 39: // Right
-          if (navZone === "menu") {
-            if (section === "Settings" || section === "Favorites" || section === "Search") {
-              setNavZone("items");
-              restoreFocus("items", section, null);
-            } else if (categories?.length > 0) {
-              setNavZone("categories");
-              restoreFocus("categories", section, null);
-            }
-          } else if (navZone === "categories") {
-            if (items?.length > 0) {
-              setNavZone("items");
-              restoreFocus("items", section, selectedCat);
-            }
-          }
+          if (navZone === "menu") setNavZone(section === "Settings" ? "items" : "categories");
+          else if (navZone === "categories") setNavZone("items");
+          else if (navZone === "items" && isPlaying) setNavZone("player");
           break;
         case 13: // Enter
           if (navZone === "menu") loadSection(MENU[focusIndex].id);
           else if (navZone === "categories") {
             const hasAll = section !== "Shows archive";
             if (hasAll && focusIndex === 0) loadItems({ id: "*", title: "All" });
-            else {
-              const cat = categories[hasAll ? focusIndex - 1 : focusIndex];
-              if (section === "Shows archive") playItem(cat);
-              else loadItems(cat);
-            }
+            else loadItems(categories[hasAll ? focusIndex - 1 : focusIndex]);
           } else if (navZone === "items") {
             if (section === "Settings") {
-              if (!editingProvider) {
-                if (focusIndex === 0) forceReload();
-                else {
-                  const pr = providers[focusIndex - 1];
-                  if (pr) startEditing(pr);
-                }
-              } else {
-                if (focusIndex < 7) {
-                  const fields = ["name", "portal", "mac", "sn", "deviceId", "deviceId2", "signature"];
-                  handleProviderInput(fields[focusIndex], editingProvider[fields[focusIndex]]);
-                } else if (focusIndex === 7) saveProvider(editingProvider);
-                else if (focusIndex === 8) saveProvider(editingProvider).then(() => selectProvider(editingProvider.id));
-                else if (focusIndex === 9) setEditingProvider(null);
-              }
-            } else {
-              playItem(items[focusIndex]);
-            }
+               if (!editingProvider) {
+                 if (focusIndex === 0) forceReload();
+                 else startEditing(providers[focusIndex - 1]);
+               } else {
+                 if (focusIndex < 7) {
+                   const fields = ["name", "portal", "mac", "sn", "deviceId", "deviceId2", "signature"];
+                   handleProviderInput(fields[focusIndex], editingProvider[fields[focusIndex]]);
+                 } else if (focusIndex === 7) saveProvider(editingProvider);
+                 else if (focusIndex === 8) saveProvider(editingProvider).then(() => selectProvider(editingProvider.id));
+                 else if (focusIndex === 9) setEditingProvider(null);
+               }
+            } else playItem(items[focusIndex]);
+          } else if (navZone === "player") {
+            if (focusIndex === 0) { isPaused ? AVPlayer.resume() : AVPlayer.pause(); setIsPaused(!isPaused); }
+            if (focusIndex === 1) AVPlayer.seek(-10000);
+            if (focusIndex === 2) AVPlayer.seek(10000);
+            if (focusIndex === 3) AVPlayer.setAspectRatio(AVPlayer.aspectRatio === "FIT" ? "FILL" : "FIT");
           }
           break;
         case 33: // PageUp (Fav)
@@ -478,17 +437,23 @@ function App() {
           break;
       }
     };
-
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [navZone, focusIndex, categories, items, section, selectedCat, favorites, loadSection, loadItems, playItem, isPlaying, toggleFavorite, editingProvider, providers]);
+  }, [navZone, focusIndex, categories, items, section, isPlaying, isPaused, favorites, editingProvider, providers, showOverlay, loadSection, loadItems, playItem, toggleFavorite]);
+
+  const formatTime = (ms) => {
+    const s = Math.floor(ms / 1000);
+    const m = Math.floor(s / 60);
+    const h = Math.floor(m / 60);
+    return `${h > 0 ? h + ':' : ''}${(m % 60).toString().padStart(2, '0')}:${(s % 60).toString().padStart(2, '0')}`;
+  };
 
   return (
     <div className={`app-shell ${isPlaying ? "video-playing" : ""}`}>
       {/* Sidebar */}
       <nav className={`sidebar ${navZone === "menu" ? "active-zone" : ""}`}>
         <div className="brand">
-          <div className="brand-logo"><Tv /></div>
+          <div className="brand-logo"><Tv color="white" /></div>
           <span>POOMANI TV</span>
         </div>
         <div className="nav-links">
@@ -505,7 +470,7 @@ function App() {
         </div>
       </nav>
 
-      {/* Categories */}
+      {/* Categories Panel */}
       {categories?.length > 0 && (
         <section className={`cat-panel ${navZone === "categories" ? "active-zone" : ""}`}>
           <div className="panel-header"><h3>Categories</h3></div>
@@ -536,128 +501,74 @@ function App() {
           </div>
         </header>
 
-        {/* Video Area */}
+        {/* Premium Player Container */}
         <div className="player-wrapper">
-          {!isPlaying && (
-            <div className="player-empty">
-              <Play size={64} className="play-icon" />
-              <span>Select content to start native playback</span>
+          {overlayVisible && isPlaying && (
+            <div className={`player-overlay visible ${navZone === "player" ? "active-zone" : ""}`}>
+              <div className="player-top">
+                <div className="player-title">
+                  <h2>{titleOf(selectedItem)}</h2>
+                  <span className="status-badge">{status}</span>
+                </div>
+                <div className="player-meta">
+                   <Clock size={20} /> {new Date().toLocaleTimeString()}
+                </div>
+              </div>
+
+              <div className="player-bottom">
+                <div className="time-info">
+                  <span>{formatTime(currentTime)}</span>
+                  <span>{formatTime(duration)}</span>
+                </div>
+                <div className="seek-bar-container">
+                  <div className="seek-bar-fill" style={{width: `${(currentTime / duration) * 100}%`}}></div>
+                </div>
+                
+                <div className="player-actions">
+                  <div className={`action-btn ${navZone === 'player' && focusIndex === 1 ? 'focused' : ''}`}><Rewind size={32}/><span className="action-label">-10s</span></div>
+                  <div className={`action-btn ${navZone === 'player' && focusIndex === 0 ? 'focused' : ''}`}>{isPaused ? <Play size={48}/> : <Pause size={48}/>}<span className="action-label">{isPaused ? "Play" : "Pause"}</span></div>
+                  <div className={`action-btn ${navZone === 'player' && focusIndex === 2 ? 'focused' : ''}`}><FastForward size={32}/><span className="action-label">+10s</span></div>
+                  <div className={`action-btn ${navZone === 'player' && focusIndex === 3 ? 'focused' : ''}`}><Maximize size={32}/><span className="action-label">{AVPlayer.aspectRatio}</span></div>
+                  <div className={`action-btn ${navZone === 'player' && focusIndex === 4 ? 'focused' : ''}`}><Volume2 size={32}/><span className="action-label">Audio</span></div>
+                  <div className={`action-btn ${navZone === 'player' && focusIndex === 5 ? 'focused' : ''}`}><Subtitles size={32}/><span className="action-label">CC</span></div>
+                </div>
+              </div>
             </div>
           )}
-          
-          {selectedItem && (
-            <div className={`overlay-info ${isPlaying ? "visible" : ""}`}>
-              <div className="meta">
-                <span className="channel-num">#{selectedItem.number || "00"}</span>
-                <h2>{titleOf(selectedItem)}</h2>
-              </div>
-              {tmdbData && (
-                <div className="tmdb-mini">
-                  <div className="rating"><Star size={16} fill="gold" color="gold"/> {tmdbData.rating}</div>
-                  <p>{tmdbData.overview?.substring(0, 150)}...</p>
-                </div>
-              )}
+          {!isPlaying && (
+            <div className="player-empty">
+              <Play size={80} color="white" />
+              <span>Select content for premium playback</span>
             </div>
           )}
         </div>
 
-        {/* Items */}
+        {/* Items Grid/List */}
         <div className={`items-container ${section === "Live streams" || section === "Radio stations" ? "list-mode" : "grid-mode"}`}>
+          {/* Settings logic matches previous multi-provider edit system */}
           {section === "Settings" && !editingProvider && (
              <div className="settings-panel" style={{width: '100%'}}>
-               <div 
-                 className={`item-card list-mode ${navZone === "items" && focusIndex === 0 ? "focused" : ""}`}
-                 onClick={forceReload}
-               >
-                 <span className="row-title">Refresh Data (Clear Cache)</span>
-                 <div className="row-right"><ChevronRight size={24} /></div>
-               </div>
-
-               <h3 style={{margin: '40px 0 20px', color: '#666', textTransform: 'uppercase', fontSize: '18px'}}>Portal Configuration</h3>
-               {(providers || []).map((p, i) => (
-                 <div 
-                   key={p.id || i}
-                   className={`item-card list-mode ${(p && p.active) ? "active" : ""} ${navZone === "items" && focusIndex === (i + 1) ? "focused" : ""}`}
-                   onClick={() => startEditing(p)}
-                 >
-                   <span className="row-title">{p.name || `Provider ${i+1}`}</span>
-                   <div className="row-right">
-                     {p.active && <div className="status-badge" style={{background: '#1688f0', color: 'white', marginRight: '10px'}}>ACTIVE</div>}
-                     <span style={{fontSize: '14px', opacity: 0.5}}>Edit Details</span>
-                     <ChevronRight size={24} />
-                   </div>
-                 </div>
-               ))}
-
-               <div className="status-badge info" style={{marginTop: '40px'}}>
-                 Version 1.4.1 - System Hardened
-               </div>
-             </div>
-          )}
-
-          {section === "Settings" && editingProvider && (
-            <div className="settings-panel" style={{width: '100%'}}>
-               <h3 style={{marginBottom: '20px'}}>Editing: {editingProvider.name}</h3>
-               
-               <div className="input-group" style={{display: 'flex', flexDirection: 'column', gap: '10px'}}>
-                  {[
-                    { label: "Name", key: "name" },
-                    { label: "Portal URL", key: "portal" },
-                    { label: "MAC Address", key: "mac" },
-                    { label: "Serial Number (SN)", key: "sn" },
-                    { label: "Device ID 1", key: "deviceId" },
-                    { label: "Device ID 2", key: "deviceId2" },
-                    { label: "Signature", key: "signature" }
-                  ].map((field, i) => (
-                    <div 
-                      key={field.key}
-                      className={`item-card list-mode ${navZone === "items" && focusIndex === i ? "focused" : ""}`}
-                      onClick={() => handleProviderInput(field.key, editingProvider[field.key])}
-                    >
-                      <span style={{width: '180px', fontSize: '16px', color: '#888'}}>{field.label}:</span>
-                      <span className="row-title" style={{fontSize: '18px'}}>{editingProvider[field.key] || "(Empty)"}</span>
-                    </div>
-                  ))}
-
-                  <div style={{display: 'flex', gap: '20px', marginTop: '30px'}}>
-                    <div 
-                      className={`item-card list-mode ${navZone === "items" && focusIndex === 7 ? "focused" : ""}`}
-                      style={{flex: 1, background: '#1688f0'}}
-                      onClick={() => saveProvider(editingProvider)}
-                    >
-                      <span className="row-title" style={{textAlign: 'center', color: 'white'}}>SAVE CONFIG</span>
-                    </div>
-                    <div 
-                      className={`item-card list-mode ${navZone === "items" && focusIndex === 8 ? "focused" : ""}`}
-                      style={{flex: 1, background: '#2ecc71'}}
-                      onClick={() => {
-                        saveProvider(editingProvider).then(() => selectProvider(editingProvider.id));
-                      }}
-                    >
-                      <span className="row-title" style={{textAlign: 'center', color: 'white'}}>ACTIVATE NOW</span>
-                    </div>
-                    <div 
-                      className={`item-card list-mode ${navZone === "items" && focusIndex === 9 ? "focused" : ""}`}
-                      style={{flex: 1, background: '#e74c3c'}}
-                      onClick={() => setEditingProvider(null)}
-                    >
-                      <span className="row-title" style={{textAlign: 'center', color: 'white'}}>CANCEL</span>
-                    </div>
+                <div className={`item-card list-mode ${navZone === "items" && focusIndex === 0 ? "focused" : ""}`} onClick={forceReload}>
+                  <span className="row-title">Refresh Data</span><ChevronRight />
+                </div>
+                {(providers || []).map((p, i) => (
+                  <div key={p.id} className={`item-card list-mode ${p.active ? "active" : ""} ${navZone === "items" && focusIndex === (i + 1) ? "focused" : ""}`} onClick={() => startEditing(p)}>
+                    <span className="row-title">{p.name}</span>{p.active && <Check color="green" />}
                   </div>
-               </div>
-            </div>
+                ))}
+             </div>
           )}
           
           {(items || []).map((it, i) => {
             const isFav = favorites.some(f => idOf(f) === idOf(it));
             return (
               <div key={i} className={`item-card ${selectedItem === it ? "active" : ""} ${navZone === "items" && focusIndex === i ? "focused" : ""}`}>
-                {section !== "Live streams" && section !== "Radio stations" ? (
+                {section !== "Live streams" ? (
                   <div className="card-inner">
-                    <img src={thumbOf(it) || "https://placehold.co/300x170/1a1a1a/ffffff?text=No+Preview"} alt="" />
+                    <img src={thumbOf(it) || "https://placehold.co/400x225/000/fff?text=No+Preview"} alt="" />
                     <div className="card-content">
                       <span className="card-title">{titleOf(it)}</span>
-                      {isFav && <Heart size={14} fill="red" color="red" />}
+                      {isFav && <Heart size={16} fill="red" color="red" />}
                     </div>
                   </div>
                 ) : (
@@ -666,7 +577,7 @@ function App() {
                     <span className="row-title">{titleOf(it)}</span>
                     <div className="row-right">
                       {it.epg_progname && <span className="row-epg">{it.epg_progname}</span>}
-                      {isFav && <Heart size={16} fill="red" color="red" />}
+                      {isFav && <Heart size={18} fill="red" color="red" />}
                     </div>
                   </>
                 )}

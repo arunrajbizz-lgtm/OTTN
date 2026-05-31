@@ -130,6 +130,15 @@ function extractUrl(data) {
 app.get("/", (req, res) => res.send(`POOMANI TV Active: ${p().name}`));
 app.get("/health", (req, res) => res.json({ status: "ok", active: p().name }));
 
+app.get("/api/test-portal", async (req, res) => {
+  try {
+    const r = await axios.get(p().portal, { timeout: 10000 });
+    res.json({ ok: true, status: r.status, provider: p().name, url: p().portal });
+  } catch (e) {
+    res.json({ ok: false, error: e.message, provider: p().name, url: p().portal });
+  }
+});
+
 app.get("/api/providers", (req, res) => {
   try {
     const list = PROVIDERS.map((pr, i) => ({ ...pr, active: i === currentIdx }));
@@ -219,6 +228,17 @@ app.get("/api/tmdb/search", async (req, res) => {
     const title = req.query.title;
     if (!title || !TMDB_API_KEY) return res.json({ ok: false });
     const response = await axios.get("https://api.themoviedb.org/3/search/movie", { params: { api_key: TMDB_API_KEY, query: title } });
+    const movie = response.data.results?.[0];
+    if (!movie) return res.json({ ok: false });
+    res.json({ ok: true, title: movie.title, overview: movie.overview, rating: movie.vote_average, poster: movie.poster_path ? `https://image.tmdb.org/t/p/w500${movie.poster_path}` : "" });
+  } catch (e) { res.json({ ok: false }); }
+});
+
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`Backend running on port ${PORT}`);
+});
+
+module.exports = app;B_API_KEY, query: title } });
     const movie = response.data.results?.[0];
     if (!movie) return res.json({ ok: false });
     res.json({ ok: true, title: movie.title, overview: movie.overview, rating: movie.vote_average, poster: movie.poster_path ? `https://image.tmdb.org/t/p/w500${movie.poster_path}` : "" });
