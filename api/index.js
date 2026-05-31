@@ -35,7 +35,6 @@ let currentIdx = 0;
 let token = "";
 let randomValue = "";
 
-// Robust User-Agent to match OTT Navigator/MAG250
 const USER_AGENT = "Mozilla/5.0 (QtEmbedded; U; Linux; C) AppleWebKit/533.3 (KHTML, like Gecko) MAG250 stbapp ver: 2 rev: 250 Safari/533.3";
 
 function p() { return PROVIDERS[currentIdx]; }
@@ -44,19 +43,17 @@ function getHeaders(useAuth = false) {
   const headers = {
     "User-Agent": USER_AGENT,
     "X-User-Agent": "Model: MAG250; Link: WiFi",
-    "Referer": `${p().portal}/c/`,
-    "Origin": p().portal,
-    "Cookie": `mac=${p().mac}; stb_lang=en; timezone=Asia/Kolkata`,
-    "Accept": "*/*",
-    "Accept-Charset": "UTF-8,*;q=0.8",
-    "Connection": "Keep-Alive",
+    Referer: `${p().portal}/c/`,
+    Origin: p().portal,
+    Cookie: `mac=${p().mac}; stb_lang=en; timezone=Asia/Kolkata`,
+    Accept: "*/*",
+    Connection: "Keep-Alive",
   };
   if (useAuth && token) headers["Authorization"] = `Bearer ${token}`;
   return headers;
 }
 
 async function stalkerRequest(params, useAuth = false) {
-  const action = params.action || params.type;
   try {
     const res = await axios.get(`${p().portal}/server/load.php`, {
       params,
@@ -64,87 +61,44 @@ async function stalkerRequest(params, useAuth = false) {
       timeout: 30000,
       validateStatus: () => true,
     });
-
     let data = res.data;
-    
-    // Log non-JSON or weird responses
     if (typeof data === "string") {
-      const trimmed = data.trim();
-      if (trimmed.startsWith("<")) {
-          console.error(`[Portal] ${p().name} returned HTML instead of JSON. Possible block or wrong URL.`);
-          return { error: "HTML_RESPONSE", raw: trimmed.substring(0, 200) };
-      }
-      try {
-        data = JSON.parse(trimmed);
-      } catch (e) {
-        console.warn(`[Portal] ${p().name} non-JSON response:`, trimmed.substring(0, 100));
-        data = { raw_text: trimmed };
-      }
+      try { data = JSON.parse(data.trim()); } catch (e) { data = { raw_text: data }; }
     }
     return data;
   } catch (err) {
-    console.error(`[Portal] Request Error (${action}):`, err.message);
+    console.error(`[Portal] Error:`, err.message);
     throw err;
   }
 }
 
 async function doHandshake() {
-  console.log(`[Auth] ${p().name} Handshake Init...`);
-  const data = await stalkerRequest({ 
-    type: "stb", 
-    action: "handshake", 
-    token: "", 
-    JsHttpRequest: "1-xml" 
-  });
-  
-  console.log(`[Auth] ${p().name} Handshake Response:`, JSON.stringify(data));
-
-  // Extract token from various possible locations (js.token, token, results.token)
+  const data = await stalkerRequest({ type: "stb", action: "handshake", token: "", JsHttpRequest: "1-xml" });
   token = data?.js?.token || data?.token || data?.results?.token || "";
   randomValue = data?.js?.random || data?.random || data?.results?.random || "";
-  
-  if (!token) {
-    console.error(`[Auth] ${p().name} Handshake Failed: No token found in response.`);
-    throw new Error("Handshake failed");
-  }
-  
-  console.log(`[Auth] ${p().name} Handshake Success. Token: ${token.substring(0, 8)}...`);
+  if (!token) throw new Error("Handshake failed");
   return data;
 }
 
 async function getProfile() {
   if (!token) await doHandshake();
-  const profile = await stalkerRequest({
+  return await stalkerRequest({
     type: "stb",
     action: "get_profile",
     hd: "1",
-    ver: "ImageDescription: 0.2.18-r22-pub-270; PORTAL version: 5.6.1;",
-    num_banks: "2",
     sn: p().sn,
     stb_type: "MAG250",
-    image_version: "218",
-    video_out: "hdmi",
     device_id: p().deviceId,
     device_id2: p().deviceId2,
     signature: p().signature,
-    auth_second_step: "1",
-    hw_version: "1.7-BD-00",
-    not_valid_token: "0",
-    client_type: "STB",
-    hw_version_2: p().deviceId.toLowerCase(),
     timestamp: Math.floor(Date.now() / 1000),
-    api_signature: "263",
     metrics: JSON.stringify({ mac: p().mac, sn: p().sn, model: "MAG250", type: "STB", uid: p().deviceId, random: randomValue }),
     JsHttpRequest: "1-xml",
   }, true);
-  
-  console.log(`[Auth] ${p().name} Profile:`, JSON.stringify(profile));
-  return profile;
 }
 
 async function ensureAuth() {
   token = "";
-  randomValue = "";
   await doHandshake();
   return await getProfile();
 }
@@ -154,77 +108,64 @@ function normalizeArray(data) {
   if (Array.isArray(data?.js)) return data.js;
   if (Array.isArray(data?.js?.data)) return data.js.data;
   if (Array.isArray(data?.data)) return data.data;
-  if (Array.isArray(data?.results)) return data.results;
   return [];
 }
 
-function extractUrl(data, originalCmd = "") {
-  const js = data?.js || {};
-  let cmd = js.cmd || js.url || js.stream_url || js.ffmpeg_cmd || data.cmd || data.url || "";
-  if (typeof data?.js === "string") cmd = data.js;
-  
-  let finalUrl = String(cmd).trim().replace(/^(ffmpeg|ffrt|mpv|auto)\s+/i, "").trim();
+/**
+ * Universal Series Logic
+ */
+function parseSeriesData(raw) {
+  console.log("SERIES RAW", JSON.stringify(raw, null, 2));
+  const js = raw?.js || raw;
+  const seasonsMap = {};
 
-  if (finalUrl.startsWith("?token=")) {
-      let base = String(originalCmd).replace(/^(ffmpeg|ffrt|mpv|auto)\s+/i, "").trim();
-      if (base.startsWith("http")) {
-          const sep = base.includes("?") ? "&" : "?";
-          return base + sep + finalUrl.substring(1);
-      }
-      if (js.stream_url && js.stream_url.includes("://")) {
-          return js.stream_url.split('?')[0] + finalUrl;
-      }
-  }
-  return finalUrl;
+  const findItems = (obj) => {
+    if (!obj || typeof obj !== 'object') return;
+    if (obj.cmd && (obj.name || obj.title)) {
+      const sId = obj.season_id || obj.season_number || "1";
+      if (!seasonsMap[sId]) seasonsMap[sId] = [];
+      seasonsMap[sId].push({
+        episode_id: obj.id || obj.episode_id || Math.random().toString(36).substr(2, 5),
+        title: obj.name || obj.title,
+        cmd: obj.cmd
+      });
+      return;
+    }
+    for (let k in obj) {
+      if (Array.isArray(obj[k])) obj[k].forEach(findItems);
+      else if (typeof obj[k] === 'object') findItems(obj[k]);
+    }
+  };
+
+  findItems(js);
+
+  const seasons = Object.keys(seasonsMap).sort().map(sId => {
+    console.log(`SEASONS: ID ${sId}`);
+    console.log(`EPISODES:`, seasonsMap[sId]);
+    return {
+      season_id: sId,
+      episodes: seasonsMap[sId]
+    };
+  });
+
+  return {
+    id: js.id || js.movie_id,
+    title: js.name || js.title,
+    seasons: seasons
+  };
 }
 
 // Routes
-app.get("/", (req, res) => res.send(`POOMANI TV Active: ${p().name}`));
-app.get("/health", (req, res) => res.json({ status: "ok", active: p().name }));
-
 app.get("/api/connect", async (req, res) => {
-  try {
-    const profile = await ensureAuth();
-    res.json({ ok: true, token, profile, provider: p().name });
-  } catch (err) { res.json({ ok: false, error: err.message }); }
-});
-
-app.get("/api/providers", (req, res) => {
-  const list = PROVIDERS.map((pr, i) => ({ ...pr, active: i === currentIdx }));
-  res.json({ ok: true, providers: list });
-});
-
-app.post("/api/select-provider", (req, res) => {
-  const { id } = req.body;
-  const idx = PROVIDERS.findIndex(pr => pr.id === id);
-  if (idx === -1) return res.json({ ok: false, error: "Provider not found" });
-  currentIdx = idx;
-  token = "";
-  res.json({ ok: true, active: p().name });
-});
-
-app.get("/api/live-categories", async (req, res) => {
-  try {
-    await ensureAuth();
-    const data = await stalkerRequest({ type: "itv", action: "get_genres", JsHttpRequest: "1-xml" }, true);
-    res.json({ ok: true, data: normalizeArray(data) });
-  } catch (err) { res.json({ ok: false, error: err.message }); }
-});
-
-app.get("/api/live-channels", async (req, res) => {
-  try {
-    await ensureAuth();
-    const genre = req.query.genre || "*";
-    const data = await stalkerRequest({ type: "itv", action: "get_ordered_list", genre, JsHttpRequest: "1-xml" }, true);
-    res.json({ ok: true, data: normalizeArray(data) });
-  } catch (err) { res.json({ ok: false, error: err.message }); }
+  try { await ensureAuth(); res.json({ ok: true, token, provider: p().name }); } 
+  catch (err) { res.json({ ok: false, error: err.message }); }
 });
 
 app.get("/api/vod-list", async (req, res) => {
   try {
     await ensureAuth();
     const { category = "*", movie_id, season_id } = req.query;
-    const params = { type: "vod", action: "get_ordered_list", category, p: "1", num: "1000", JsHttpRequest: "1-xml" };
+    const params = { type: "vod", action: "get_ordered_list", category, JsHttpRequest: "1-xml" };
     if (movie_id) params.movie_id = movie_id;
     if (season_id) params.season_id = season_id;
     const data = await stalkerRequest(params, true);
@@ -235,35 +176,25 @@ app.get("/api/vod-list", async (req, res) => {
 app.get("/api/series-info", async (req, res) => {
   try {
     await ensureAuth();
-    const movie_id = req.query.id;
-    const data = await stalkerRequest({ type: "vod", action: "get_info", movie_id, JsHttpRequest: "1-xml" }, true);
-    res.json({ ok: true, data });
+    const id = req.query.id;
+    const raw = await stalkerRequest({ type: "vod", action: "get_info", movie_id: id, JsHttpRequest: "1-xml" }, true);
+    const parsed = parseSeriesData(raw);
+    res.json({ ok: true, data: parsed });
   } catch (err) { res.json({ ok: false, error: err.message }); }
 });
 
 app.get("/api/create-link", async (req, res) => {
   try {
     await ensureAuth();
-    const { cmd = "", type = "itv", series = "0", movie_id, season_id, episode_id } = req.query;
-    const params = { type, action: "create_link", cmd, series, JsHttpRequest: "1-xml" };
+    const { cmd, movie_id, season_id, episode_id } = req.query;
+    const params = { type: "vod", action: "create_link", cmd, series: "2", JsHttpRequest: "1-xml" };
     if (movie_id) params.movie_id = movie_id;
     if (season_id) params.season_id = season_id;
     if (episode_id) params.episode_id = episode_id;
     const data = await stalkerRequest(params, true);
-    const playUrl = extractUrl(data, cmd);
-    res.json({ ok: !!playUrl, url: playUrl, raw: data });
-  } catch (err) { res.json({ ok: false, error: err.message }); }
-});
-
-app.get("/api/search", async (req, res) => {
-  try {
-    await ensureAuth();
-    const q = req.query.q || "";
-    const [live, vod] = await Promise.all([
-      stalkerRequest({ type: "itv", action: "get_ordered_list", search: q, JsHttpRequest: "1-xml" }, true),
-      stalkerRequest({ type: "vod", action: "get_ordered_list", search: q, JsHttpRequest: "1-xml" }, true)
-    ]);
-    res.json({ ok: true, data: [...normalizeArray(live), ...normalizeArray(vod)] });
+    const js = data?.js || {};
+    let url = js.cmd || js.url || data.cmd || data.url || "";
+    res.json({ ok: !!url, url: String(url).replace(/^(ffmpeg|ffrt|mpv|auto)\s+/i, "").trim(), raw: data });
   } catch (err) { res.json({ ok: false, error: err.message }); }
 });
 
