@@ -30,7 +30,13 @@ const AVPlayer = {
   ratio: "FIT",
   init: function() {
     if (!this.isAvailable) return;
-    ["MediaPlay", "MediaPause", "MediaStop", "MediaRewind", "MediaFastForward"].forEach(k => {
+    const keys = [
+      "MediaPlay", "MediaPause", "MediaStop", "MediaRewind", "MediaFastForward",
+      "0", "1", "2", "3", "4", "5", "6", "7", "8", "9",
+      "ChannelUp", "ChannelDown", "VolumeUp", "VolumeDown", "VolumeMute",
+      "Info", "Guide", "Search", "Menu", "Source", "ColorRed", "ColorGreen", "ColorYellow", "ColorBlue"
+    ];
+    keys.forEach(k => {
       try { window.tizen.tvinputdevice.registerKey(k); } catch(e){}
     });
   },
@@ -118,7 +124,24 @@ function App() {
       return; 
     }
     if (sec === "Favorites") { setItems(favorites); setNavZone("items"); return; }
-    if (sec === "Search") { setNavZone("items"); setStatus("Search Mode"); return; }
+    if (sec === "Search") { 
+      setNavZone("items"); 
+      const query = prompt("Search for content...");
+      if (query) {
+        setStatus(`Searching for "${query}"...`);
+        api(`/api/search?q=${encodeURIComponent(query)}`).then(j => {
+          if (j.ok) {
+            setItems(j.data || []);
+            setStatus(j.data?.length ? `Found ${j.data.length} results` : "No results found");
+          } else {
+            setStatus("Search failed");
+          }
+        });
+      } else {
+        setStatus("Search Mode");
+      }
+      return; 
+    }
 
     const cached = Cache.get(sec);
     if (cached) {
@@ -174,6 +197,16 @@ function App() {
     }
   }, [section, api]);
 
+  const toggleFavorite = useCallback((item) => {
+    if (!item) return;
+    setFavorites(prev => {
+      const isFav = prev.some(f => idOf(f) === idOf(item));
+      const next = isFav ? prev.filter(f => idOf(f) !== idOf(item)) : [...prev, item];
+      localStorage.setItem("favs", JSON.stringify(next));
+      return next;
+    });
+  }, []);
+
   const playItem = useCallback(async (item) => {
     if (!item) return;
     setSelectedItem(item);
@@ -207,20 +240,76 @@ function App() {
       const key = e.keyCode || e.which;
       showOverlay();
 
-      if (key === 10009 || key === 27) {
-        if (editingProvider) { setEditingProvider(null); setFocusIndex(0); return; }
-        if (overlay && navZone === "player") { setNavZone("items"); setOverlay(false); return; }
-        if (isPlaying) { AVPlayer.stop(); setIsPlaying(false); return; }
-        if (navZone === "items") { 
-          if (section === "Settings" || section === "Favorites" || section === "Search") {
-            setNavZone("menu"); setFocusIndex(MENU.findIndex(m => m.id === section));
-          } else {
-            setNavZone("categories"); setFocusIndex(0);
+      // Handle Tizen/Web Key Mappings
+      switch(key) {
+        case 10009: // Return
+        case 27:    // ESC
+          if (editingProvider) { setEditingProvider(null); setFocusIndex(0); return; }
+          if (overlay && navZone === "player") { setNavZone("items"); setOverlay(false); return; }
+          if (isPlaying) { AVPlayer.stop(); setIsPlaying(false); return; }
+          if (navZone === "items") { 
+            if (section === "Settings" || section === "Favorites" || section === "Search") {
+              setNavZone("menu"); setFocusIndex(MENU.findIndex(m => m.id === section));
+            } else {
+              setNavZone("categories"); setFocusIndex(0);
+            }
+            return;
           }
+          if (navZone === "categories") { setNavZone("menu"); setFocusIndex(MENU.findIndex(m => m.id === section)); return; }
           return;
-        }
-        if (navZone === "categories") { setNavZone("menu"); setFocusIndex(MENU.findIndex(m => m.id === section)); return; }
-        return;
+
+        case 415: // MediaPlay
+        case 19:  // MediaPause
+        case 10252: // MediaPlayPause
+          if (isPlaying) {
+            isPaused ? AVPlayer.resume() : AVPlayer.pause();
+            setIsPaused(!isPaused);
+          }
+          break;
+        case 413: // MediaStop
+          if (isPlaying) { AVPlayer.stop(); setIsPlaying(false); }
+          break;
+        case 412: // MediaRewind
+          if (isPlaying) AVPlayer.seek(-30000);
+          break;
+        case 417: // MediaFastForward
+          if (isPlaying) AVPlayer.seek(30000);
+          break;
+        case 427: // ChannelUp
+          if (navZone === "items" && section === "Live streams" && items?.length > 0) {
+            const next = (focusIndex + 1) % items.length;
+            setFocusIndex(next);
+            playItem(items[next]);
+          }
+          break;
+        case 428: // ChannelDown
+          if (navZone === "items" && section === "Live streams" && items?.length > 0) {
+            const prev = (focusIndex - 1 + items.length) % items.length;
+            setFocusIndex(prev);
+            playItem(items[prev]);
+          }
+          break;
+        case 31: // Info
+          setOverlay(true);
+          break;
+        case 458: // Guide
+          loadSection("Live streams");
+          break;
+        case 10182: // Search
+          loadSection("Search");
+          break;
+        case 403: // ColorRed
+          if (navZone === "items" && items[focusIndex]) toggleFavorite(items[focusIndex]);
+          break;
+        case 404: // ColorGreen
+          if (isPlaying) { /* Track switch logic could go here */ setStatus("Switching Audio..."); }
+          break;
+        case 405: // ColorYellow
+          if (isPlaying) { /* Subtitle logic could go here */ setStatus("Subtitles Toggled"); }
+          break;
+        case 406: // ColorBlue
+          if (isPlaying) AVPlayer.setRatio(AVPlayer.ratio === "FIT" ? "FILL" : "FIT");
+          break;
       }
 
       let max = navZone === "menu" ? MENU.length : 
@@ -282,6 +371,13 @@ function App() {
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
   }, [navZone, focusIndex, categories, items, section, isPlaying, overlay, editingProvider, providers, isPaused, showOverlay, loadSection, loadItems, playItem, api]);
+
+  useEffect(() => {
+    const focused = document.querySelector('.focused');
+    if (focused) {
+      focused.scrollIntoView({ behavior: 'auto', block: 'nearest', inline: 'nearest' });
+    }
+  }, [focusIndex, navZone]);
 
   const formatT = (ms) => {
     const s = Math.floor((ms || 0) / 1000);
