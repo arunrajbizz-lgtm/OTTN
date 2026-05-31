@@ -73,18 +73,19 @@ async function stalkerRequest(params, useAuth = false) {
     });
     let data = res.data;
     console.log(`[Portal] Response Status: ${res.status} for ${params.action}`);
+    
     if (typeof data === "string") {
       let trimmed = data.trim();
-      // Some portals prefix JSON with digits (e.g., "1{...}")
-      const match = trimmed.match(/^(\d+)(.*)/);
-      if (match && match[2]) {
-        console.log(`[Portal] Stripped leading ${match[1]} from response`);
-        trimmed = match[2].trim();
+      // Remove any leading junk before the first { or [
+      const firstBrace = trimmed.search(/[\{\[]/);
+      if (firstBrace > 0) {
+        console.log(`[Portal] Stripped ${firstBrace} characters of junk from start`);
+        trimmed = trimmed.substring(firstBrace).trim();
       }
       try { 
         data = JSON.parse(trimmed); 
       } catch (e) { 
-        console.warn(`[Portal] Failed to parse JSON from ${params.action}. Raw sample: ${trimmed.substring(0, 100)}`);
+        console.warn(`[Portal] JSON Parse Failed. Sample: ${trimmed.substring(0, 100)}`);
         data = { raw_text: trimmed }; 
       }
     }
@@ -164,8 +165,9 @@ function normalizeArray(data) {
   if (!data) return [];
   if (Array.isArray(data)) return data;
   
-  // Unwrap nested structures
+  // Extract the most likely array candidate from common Stalker wrappers
   const obj = data.js || data.results || data.data || data;
+  
   if (Array.isArray(obj)) return obj;
   if (Array.isArray(obj?.data)) return obj.data;
   if (Array.isArray(obj?.js)) return obj.js;
@@ -174,7 +176,7 @@ function normalizeArray(data) {
   if (typeof obj === 'object' && obj !== null) {
     const vals = Object.values(obj);
     if (vals.length > 0 && typeof vals[0] === 'object') {
-      return vals.filter(x => x !== null && typeof x === 'object');
+      return vals.filter(x => x !== null && typeof x === 'object' && (x.id || x.name || x.title || x.cmd));
     }
   }
   
