@@ -170,13 +170,14 @@ function App() {
 
   const loadItems = useCallback(async (cat) => {
     if (!cat) return;
-    setSelectedCat(cat); setItems([]); setStatus("Loading...");
+    setSelectedCat(cat); setItems([]); setStatus(`Loading items for ${titleOf(cat)}...`);
     const id = idOf(cat);
     const cKey = `${section}_${id}`;
     const cached = Cache.get(cKey);
     if (cached) { 
       setItems(cached); 
       switchZone("items");
+      setStatus("Ready (Cached)");
       return; 
     }
 
@@ -190,7 +191,9 @@ function App() {
       setItems(j.data || []);
       Cache.set(cKey, j.data || []);
       switchZone("items");
-      setStatus("Ready");
+      setStatus(j.data?.length ? "Ready" : "No items found");
+    } else {
+      setStatus("Portal Error: " + (j.error || "Failed to load list"));
     }
   }, [section, api, switchZone]);
 

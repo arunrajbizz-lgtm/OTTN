@@ -63,6 +63,7 @@ function getHeaders(useAuth = false) {
 
 async function stalkerRequest(params, useAuth = false) {
   const url = `${p().portal}/server/load.php`;
+  console.log(`[Portal] Request: ${params.action} for ${p().name} (Auth: ${useAuth})`);
   try {
     const res = await axios.get(url, {
       params,
@@ -71,6 +72,7 @@ async function stalkerRequest(params, useAuth = false) {
       validateStatus: () => true,
     });
     let data = res.data;
+    console.log(`[Portal] Response Status: ${res.status} for ${params.action}`);
     if (typeof data === "string") {
       const trimmed = data.trim();
       try { 
