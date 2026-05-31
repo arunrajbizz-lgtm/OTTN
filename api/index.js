@@ -72,12 +72,33 @@ async function stalkerRequest(params, useAuth = false) {
 }
 
 async function doHandshake() {
-  const handshakeParams = { type: "stb", action: "handshake", token: "", mac: p().mac, stb_type: "MAG250", JsHttpRequest: "1-xml" };
+  console.log(`[Auth] Handshake Init for ${p().name}...`);
+  const handshakeParams = { 
+    type: "stb", 
+    action: "handshake", 
+    token: "", 
+    mac: p().mac,
+    stb_type: "MAG250",
+    JsHttpRequest: "1-xml" 
+  };
+  
   let data = await stalkerRequest(handshakeParams);
-  if (!data || data.js === false || !data.js?.token) data = await stalkerRequest({ type: "stb", action: "handshake", token: "" });
+  
+  if (!data || data.js === false || !data.js?.token) {
+      console.warn(`[Auth] Phase 1 failed, trying Phase 2...`);
+      data = await stalkerRequest({ type: "stb", action: "handshake", token: "" });
+  }
+
+  console.log(`[Auth] Handshake Response:`, JSON.stringify(data));
+
   token = data?.js?.token || data?.token || data?.results?.token || "";
   randomValue = data?.js?.random || data?.random || data?.results?.random || "";
-  if (!token) throw new Error("Handshake failed");
+  
+  if (!token) {
+    throw new Error(`Handshake failed. Portal returned: ${JSON.stringify(data).substring(0, 100)}`);
+  }
+  
+  console.log(`[Auth] Handshake OK: ${token.substring(0, 8)}...`);
   return data;
 }
 
@@ -99,8 +120,7 @@ async function getProfile() {
 }
 
 async function ensureAuth() {
-  token = "";
-  await doHandshake();
+  if (token) return; // Reuse existing token
   return await getProfile();
 }
 
