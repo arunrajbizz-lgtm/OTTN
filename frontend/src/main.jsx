@@ -377,7 +377,7 @@ function App() {
               <div key={i} className={`list-row ${selectedCat === c ? "active" : ""} ${navZone === "categories" && focusIndex === (section !== "Shows archive" ? i + 1 : i) ? "focused" : ""}`}>{titleOf(c)}</div>
             ))}
           </div>
-        </section> section>
+        </section>
       )}
 
       {seriesData && (
