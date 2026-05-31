@@ -72,7 +72,6 @@ async function stalkerRequest(params, useAuth = false) {
 }
 
 async function doHandshake() {
-  console.log(`[Auth] Handshake Init for ${p().name}...`);
   const handshakeParams = { 
     type: "stb", 
     action: "handshake", 
@@ -81,24 +80,17 @@ async function doHandshake() {
     stb_type: "MAG250",
     JsHttpRequest: "1-xml" 
   };
-  
   let data = await stalkerRequest(handshakeParams);
-  
   if (!data || data.js === false || !data.js?.token) {
-      console.warn(`[Auth] Phase 1 failed, trying Phase 2...`);
       data = await stalkerRequest({ type: "stb", action: "handshake", token: "" });
   }
-
-  console.log(`[Auth] Handshake Response:`, JSON.stringify(data));
-
   token = data?.js?.token || data?.token || data?.results?.token || "";
   randomValue = data?.js?.random || data?.random || data?.results?.random || "";
   
   if (!token) {
-    throw new Error(`Handshake failed. Portal returned: ${JSON.stringify(data).substring(0, 100)}`);
+    console.error("[Handshake] FAILED Response:", JSON.stringify(data));
+    throw new Error(`Handshake failed: ${JSON.stringify(data).substring(0, 100)}`);
   }
-  
-  console.log(`[Auth] Handshake OK: ${token.substring(0, 8)}...`);
   return data;
 }
 
@@ -120,7 +112,7 @@ async function getProfile() {
 }
 
 async function ensureAuth() {
-  if (token) return; // Reuse existing token
+  if (token) return; 
   return await getProfile();
 }
 
@@ -132,36 +124,77 @@ function normalizeArray(data) {
   return [];
 }
 
-// PRODUCTION SERIES LOGIC
+// Routes
+app.get("/api/connect", async (req, res) => {
+  try { await ensureAuth(); res.json({ ok: true, token, provider: p().name }); } 
+  catch (err) { res.json({ ok: false, error: err.message }); }
+});
+
+app.get("/api/media-library", async (req, res) => {
+  try {
+    await ensureAuth();
+    console.log("[VOD] Fetching categories for", p().name);
+    
+    // Strategy 1: get_categories
+    let raw = await stalkerRequest({ type: "vod", action: "get_categories", JsHttpRequest: "1-xml" }, true);
+    let data = normalizeArray(raw);
+
+    // Strategy 2: get_genres
+    if (data.length === 0) {
+      console.warn("[VOD] Strategy 1 (get_categories) returned nothing, trying Strategy 2 (get_genres)");
+      raw = await stalkerRequest({ type: "vod", action: "get_genres", JsHttpRequest: "1-xml" }, true);
+      data = normalizeArray(raw);
+    }
+
+    // Strategy 3: Manual scan if still empty (Ultra fallback)
+    if (data.length === 0) {
+      console.warn("[VOD] Strategy 2 failed, attempting Strategy 3 (Manual List Scan)");
+      raw = await stalkerRequest({ type: "vod", action: "get_ordered_list", JsHttpRequest: "1-xml" }, true);
+      const items = normalizeArray(raw);
+      const uniqueCats = new Set();
+      items.forEach(it => { if(it.category_id) uniqueCats.add(it.category_id); });
+      data = Array.from(uniqueCats).map(id => ({ id, title: `Category ${id}`, category_id: id }));
+    }
+
+    res.json({ ok: true, data });
+  } catch (err) { res.json({ ok: false, error: err.message }); }
+});
+
+app.get("/api/vod-list", async (req, res) => {
+  try {
+    await ensureAuth();
+    const { category = "*", movie_id, season_id } = req.query;
+    const params = { type: "vod", action: "get_ordered_list", category, p: "1", num: "1000", JsHttpRequest: "1-xml" };
+    if (movie_id) params.movie_id = movie_id;
+    if (season_id) params.season_id = season_id;
+    const raw = await stalkerRequest(params, true);
+    res.json({ ok: true, data: normalizeArray(raw) });
+  } catch (err) { res.json({ ok: false, error: err.message }); }
+});
+
 app.get("/api/series-info", async (req, res) => {
   try {
     await ensureAuth();
     const movie_id = req.query.id;
-    
-    // STEP 1: Get Seasons
-    const seasonData = await stalkerRequest({ type: "vod", action: "get_ordered_list", movie_id, JsHttpRequest: "1-xml" }, true);
-    const rawSeasons = normalizeArray(seasonData);
+    const rawSeasons = await stalkerRequest({ type: "vod", action: "get_ordered_list", movie_id, JsHttpRequest: "1-xml" }, true);
+    const seasonsArr = normalizeArray(rawSeasons);
     
     const seasons = [];
-    for (const s of rawSeasons) {
+    for (const s of seasonsArr) {
       if (!s.id || !s.is_season) continue;
-      
-      // STEP 2: Get Episodes for this Season
-      const epData = await stalkerRequest({ type: "vod", action: "get_ordered_list", movie_id, season_id: s.id, JsHttpRequest: "1-xml" }, true);
-      const rawEpisodes = normalizeArray(epData);
-      
+      const rawEpisodes = await stalkerRequest({ type: "vod", action: "get_ordered_list", movie_id, season_id: s.id, JsHttpRequest: "1-xml" }, true);
+      const episodesArr = normalizeArray(rawEpisodes);
       seasons.push({
         id: s.id,
-        seasonNumber: parseInt(s.season_number || s.number || 1),
-        episodes: rawEpisodes.map(e => ({
+        seasonNumber: parseInt(s.season_number || 1),
+        episodes: episodesArr.map(e => ({
           id: e.id,
-          episodeNumber: parseInt(e.series_number || e.number || 0),
+          episodeNumber: parseInt(e.series_number || 0),
           title: e.name || e.title || `Episode ${e.series_number}`,
           cmd: e.cmd
         }))
       });
     }
-
     res.json({ ok: true, id: movie_id, seasons });
   } catch (err) { res.json({ ok: false, error: err.message }); }
 });
@@ -170,131 +203,40 @@ app.get("/api/episode-link", async (req, res) => {
   try {
     await ensureAuth();
     const { series_id, season_id, episode_id } = req.query;
+    const rawEpisode = await stalkerRequest({ type: "vod", action: "get_ordered_list", movie_id: series_id, season_id, episode_id, JsHttpRequest: "1-xml" }, true);
+    const episodes = normalizeArray(rawEpisode);
+    const episode = episodes[0];
+    if (!episode || !episode.cmd) throw new Error("Missing episode command");
     
-    // 1. Get exact episode metadata to obtain the 'cmd'
-    const epData = await stalkerRequest({ 
-      type: "vod", 
-      action: "get_ordered_list", 
-      movie_id: series_id, 
-      season_id: season_id, 
-      episode_id: episode_id,
-      JsHttpRequest: "1-xml" 
-    }, true);
-    
-    const episodes = normalizeArray(epData);
-    const episode = episodes[0]; // Portal returns the single requested episode in an array
-    
-    if (!episode || !episode.cmd) {
-        console.error("EPISODE_CMD_DISCOVERY_FAILED", JSON.stringify(epData));
-        throw new Error("Episode command not found in portal response");
-    }
-
-    // 2. Call create_link with the discovered cmd and series="2"
-    const params = {
-      type: "vod",
-      action: "create_link",
-      cmd: episode.cmd,
-      series: "2",
-      movie_id: series_id,
-      season_id: season_id,
-      episode_id: episode_id,
-      JsHttpRequest: "1-xml"
-    };
-
-    const data = await stalkerRequest(params, true);
-    const js = data?.js || {};
-    let url = js.cmd || js.url || data.cmd || data.url || "";
-    
-    res.json({ 
-      ok: !!url, 
-      url: String(url).replace(/^(ffmpeg|ffrt|mpv|auto)\s+/i, "").trim() 
-    });
+    const rawLink = await stalkerRequest({ type: "vod", action: "create_link", cmd: episode.cmd, series: "2", JsHttpRequest: "1-xml" }, true);
+    const js = rawLink?.js || {};
+    let url = js.cmd || js.url || rawLink.cmd || rawLink.url || "";
+    res.json({ ok: !!url, url: String(url).replace(/^(ffmpeg|ffrt|mpv|auto)\s+/i, "").trim() });
   } catch (err) { res.json({ ok: false, error: err.message }); }
-});
-
-// Routes
-app.get("/api/connect", async (req, res) => {
-  try { await ensureAuth(); res.json({ ok: true, token, provider: p().name }); } 
-  catch (err) { res.json({ ok: false, error: err.message }); }
 });
 
 app.get("/api/live-categories", async (req, res) => {
   try {
     await ensureAuth();
-    const data = await stalkerRequest({ type: "itv", action: "get_genres", JsHttpRequest: "1-xml" }, true);
-    res.json({ ok: true, data: normalizeArray(data) });
-  } catch (err) { res.json({ ok: false, error: err.message }); }
-});
-
-app.get("/api/media-library", async (req, res) => {
-  try {
-    await ensureAuth();
-    // Try Strategy 1: get_categories
-    let data = await stalkerRequest({ type: "vod", action: "get_categories", JsHttpRequest: "1-xml" }, true);
-    let normalized = normalizeArray(data);
-
-    // Strategy 2: Fallback to get_genres if categories are empty or js:false
-    if (normalized.length === 0) {
-        console.warn(`[VOD] get_categories failed for ${p().name}, trying get_genres...`);
-        data = await stalkerRequest({ type: "vod", action: "get_genres", JsHttpRequest: "1-xml" }, true);
-        normalized = normalizeArray(data);
-    }
-
-    console.log(`[VOD] Categories discovered: ${normalized.length}`);
-    res.json({ ok: true, data: normalized });
-  } catch (err) { res.json({ ok: false, error: err.message }); }
-});
-
-app.get("/api/radio", async (req, res) => {
-  try {
-    await ensureAuth();
-    const data = await stalkerRequest({ type: "radio", action: "get_categories", JsHttpRequest: "1-xml" }, true);
-    res.json({ ok: true, data: normalizeArray(data) });
-  } catch (err) { res.json({ ok: false, error: err.message }); }
-});
-
-app.get("/api/archive-categories", async (req, res) => {
-  try {
-    await ensureAuth();
-    const data = await stalkerRequest({ type: "itv", action: "get_genres", JsHttpRequest: "1-xml" }, true);
-    res.json({ ok: true, data: normalizeArray(data) });
-  } catch (err) { res.json({ ok: false, error: err.message }); }
-});
-
-app.get("/api/archive-list", async (req, res) => {
-  try {
-    await ensureAuth();
-    const genre = req.query.genre || "*";
-    const data = await stalkerRequest({ type: "itv", action: "get_ordered_list", genre, JsHttpRequest: "1-xml" }, true);
-    res.json({ ok: true, data: normalizeArray(data) });
+    const raw = await stalkerRequest({ type: "itv", action: "get_genres", JsHttpRequest: "1-xml" }, true);
+    res.json({ ok: true, data: normalizeArray(raw) });
   } catch (err) { res.json({ ok: false, error: err.message }); }
 });
 
 app.get("/api/live-channels", async (req, res) => {
   try {
     await ensureAuth();
-    const genre = req.query.genre || "*";
-    const data = await stalkerRequest({ type: "itv", action: "get_ordered_list", genre, force_ch_link_check: "0", JsHttpRequest: "1-xml" }, true);
-    res.json({ ok: true, data: normalizeArray(data) });
-  } catch (err) { res.json({ ok: false, error: err.message }); }
-});
-
-app.get("/api/vod-list", async (req, res) => {
-  try {
-    await ensureAuth();
-    const category = req.query.category || "*";
-    const data = await stalkerRequest({ type: "vod", action: "get_ordered_list", category, p: "1", num: "1000", JsHttpRequest: "1-xml" }, true);
-    res.json({ ok: true, data: normalizeArray(data) });
+    const raw = await stalkerRequest({ type: "itv", action: "get_ordered_list", genre: req.query.genre || "*", JsHttpRequest: "1-xml" }, true);
+    res.json({ ok: true, data: normalizeArray(raw) });
   } catch (err) { res.json({ ok: false, error: err.message }); }
 });
 
 app.get("/api/create-link", async (req, res) => {
   try {
     await ensureAuth();
-    const { cmd = "", type = "itv" } = req.query;
-    const data = await stalkerRequest({ type, action: "create_link", cmd, JsHttpRequest: "1-xml" }, true);
-    const js = data?.js || {};
-    let url = js.cmd || js.url || data.cmd || data.url || "";
+    const raw = await stalkerRequest({ type: req.query.type || "itv", action: "create_link", cmd: req.query.cmd, JsHttpRequest: "1-xml" }, true);
+    const js = raw?.js || {};
+    let url = js.cmd || js.url || raw.cmd || raw.url || "";
     res.json({ ok: !!url, url: String(url).replace(/^(ffmpeg|ffrt|mpv|auto)\s+/i, "").trim() });
   } catch (err) { res.json({ ok: false, error: err.message }); }
 });
@@ -311,22 +253,5 @@ app.get("/api/search", async (req, res) => {
   } catch (err) { res.json({ ok: false, error: err.message }); }
 });
 
-app.get("/api/episode-debug", async (req, res) => {
-  try {
-    await ensureAuth();
-    const { series_id, season_id, episode_id } = req.query;
-    
-    const [test1, test2, test3, test4, test5] = await Promise.all([
-      stalkerRequest({ type: "vod", action: "get_ordered_list", movie_id: series_id, season_id: season_id, episode_id: episode_id, JsHttpRequest: "1-xml" }, true),
-      stalkerRequest({ type: "vod", action: "get_ordered_list", movie_id: series_id, season_id: season_id, JsHttpRequest: "1-xml" }, true),
-      stalkerRequest({ type: "vod", action: "get_info", movie_id: episode_id, JsHttpRequest: "1-xml" }, true),
-      stalkerRequest({ type: "vod", action: "create_link", cmd: `/media/${episode_id}.mpg`, series: "2", JsHttpRequest: "1-xml" }, true),
-      stalkerRequest({ type: "vod", action: "create_link", cmd: `/media/${series_id}.mpg`, series: "2", JsHttpRequest: "1-xml" }, true)
-    ]);
-
-    res.json({ ok: true, test1, test2, test3, test4, test5 });
-  } catch (err) { res.json({ ok: false, error: err.message }); }
-});
-
-app.listen(PORT, "0.0.0.0", () => console.log(`Server on ${PORT}`));
+app.listen(PORT, "0.0.0.0", () => console.log(`Backend on ${PORT}`));
 module.exports = app;

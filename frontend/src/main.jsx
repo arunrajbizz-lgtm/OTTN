@@ -4,11 +4,11 @@ import {
   Tv, Film, Radio, History, Settings as SettingsIcon, Search, Heart, 
   Play, Pause, Info, Clock, AlertCircle, ChevronRight, 
   Maximize, Volume2, Subtitles, FastForward, Rewind, Check, List, Layers, 
-  Calendar, Star, Clapperboard, RotateCcw, RotateCw
+  Calendar, Star, Clapperboard, RotateCcw, RotateCw, PlayCircle
 } from "lucide-react";
 import "./style.css";
 
-const BACKEND = ""; // Relative proxy for production
+const BACKEND = ""; // Relative for production
 
 const MENU = [
   { id: "Live streams", icon: Tv, label: "Live streams" },
@@ -31,15 +31,8 @@ const AVPlayer = {
   ratio: "FIT",
   init: function() {
     if (!this.isAvailable) return;
-    const keys = [
-      "MediaPlay", "MediaPause", "MediaStop", "MediaRewind", "MediaFastForward",
-      "0", "1", "2", "3", "4", "5", "6", "7", "8", "9",
-      "ChannelUp", "ChannelDown", "VolumeUp", "VolumeDown", "VolumeMute",
-      "Info", "Guide", "Search", "Menu", "Source", "ColorRed", "ColorGreen", "ColorYellow", "ColorBlue"
-    ];
-    keys.forEach(k => {
-      try { window.tizen.tvinputdevice.registerKey(k); } catch(e){}
-    });
+    const keys = ["MediaPlay", "MediaPause", "MediaStop", "MediaRewind", "MediaFastForward", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "ChannelUp", "ChannelDown", "VolumeUp", "VolumeDown", "VolumeMute", "Info", "Guide", "Search", "Menu", "Source", "ColorRed", "ColorGreen", "ColorYellow", "ColorBlue"];
+    keys.forEach(k => { try { window.tizen.tvinputdevice.registerKey(k); } catch(e){} });
   },
   play: function(url, onStatus, onProgress) {
     if (!this.isAvailable) return;
@@ -266,7 +259,6 @@ function App() {
         return;
       }
 
-      // Media Hardware Keys
       switch(key) {
         case 415: case 19: case 10252: if (isPlaying) { isPaused ? AVPlayer.resume() : AVPlayer.pause(); setIsPaused(!isPaused); } break;
         case 413: if (isPlaying) { AVPlayer.stop(); setIsPlaying(false); setNavZone(seriesData ? "episodes" : "items"); } break;
@@ -358,7 +350,7 @@ function App() {
 
       {(categories?.length > 0 && !seriesData) && (
         <section className={`cat-panel ${navZone === "categories" ? "active-zone" : ""}`}>
-          <div className="panel-header"><h3>Categories</h3></div>
+          <div className="panel-header"><h3>Browse</h3></div>
           <div className="scroll-list">
             {section !== "Shows archive" && (
               <div className={`list-row ${selectedCat?.id === "*" ? "active" : ""} ${navZone === "categories" && focusIndex === 0 ? "focused" : ""}`}>All Content</div>
@@ -400,7 +392,7 @@ function App() {
                       <span className="tag"><Star size={14} color="#f5c518" fill="#f5c518"/> {seriesData.originalItem.rating || "8.5"}</span>
                       <span className="tag hd">4K Ultra HD</span>
                     </div>
-                    <p className="hero-plot">{seriesData.originalItem.description || seriesData.originalItem.info || "Discover the intense journey in this acclaimed series. Now streaming in high definition."}</p>
+                    <p className="hero-plot">{seriesData.originalItem.description || seriesData.originalItem.info || "Streaming now in high definition. Enjoy premium cinematic experience."}</p>
                 </div>
               </div>
           </div>
@@ -415,7 +407,7 @@ function App() {
                     <b className="ep-title">{ep.title}</b>
                     <span className="ep-meta">Streaming Available • 1080p</span>
                  </div>
-                 <Play size={20} className="ep-play-icon" />
+                 <PlayCircle size={32} className="ep-play-icon" />
               </div>
             ))
           ) : (
@@ -438,18 +430,12 @@ function App() {
         </div>
       </main>
 
-      {/* Full-Screen Player UI Overlay */}
       <div className={`full-player-ui ${isPlaying && overlay ? "visible" : ""}`}>
           <div className="player-controls">
               <h1 className="player-title">{titleOf(selectedItem)}</h1>
               <div className="player-progress-container">
-                  <div className="progress-track">
-                      <div className="progress-fill" style={{width: `${(progress.current / (progress.duration || 1)) * 100}%`}}></div>
-                  </div>
-                  <div className="player-times">
-                      <span>{formatT(progress.current)}</span>
-                      <span>{formatT(progress.duration)}</span>
-                  </div>
+                  <div className="progress-track"><div className="progress-fill" style={{width: `${(progress.current / (progress.duration || 1)) * 100}%`}}></div></div>
+                  <div className="player-times"><span>{formatT(progress.current)}</span><span>{formatT(progress.duration)}</span></div>
               </div>
               <div className="player-actions">
                   <div className={`player-btn ${navZone === "player" && focusIndex === 0 ? "focused" : ""}`}>{isPaused ? <Play size={60} fill="white"/> : <Pause size={60} fill="white"/>}</div>
