@@ -129,6 +129,16 @@ app.get("/api/vod-list", async (req, res) => {
   } catch (err) { res.json({ ok: false, error: err.message }); }
 });
 
+app.get("/api/series-info", async (req, res) => {
+  try {
+    await ensureAuth();
+    const id = req.query.id;
+    const data = await stalkerRequest({ type: "vod", action: "get_ordered_list", movie_id: id, JsHttpRequest: "1-xml" }, true);
+    console.log("SERIES_INFO_RAW", JSON.stringify(data, null, 2));
+    res.json({ ok: true, raw: data });
+  } catch (err) { res.json({ ok: false, error: err.message }); }
+});
+
 app.get("/api/series-debug", async (req, res) => {
   try {
     await ensureAuth();
