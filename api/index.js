@@ -261,5 +261,29 @@ app.get("/api/create-link", async (req, res) => {
   } catch (err) { res.json({ ok: false, error: err.message }); }
 });
 
+app.get("/api/series-debug", async (req, res) => {
+  try {
+    await ensureAuth();
+    const id = req.query.id;
+    
+    const [test1, test2, test3, test4, test5] = await Promise.all([
+      stalkerRequest({ type: "vod", action: "get_info", movie_id: id, JsHttpRequest: "1-xml" }, true),
+      stalkerRequest({ type: "vod", action: "get_ordered_list", movie_id: id, JsHttpRequest: "1-xml" }, true),
+      stalkerRequest({ type: "vod", action: "get_ordered_list", category: id, JsHttpRequest: "1-xml" }, true),
+      stalkerRequest({ type: "vod", action: "get_info", movie_id: id, season_id: "0", JsHttpRequest: "1-xml" }, true),
+      stalkerRequest({ type: "vod", action: "create_link", cmd: `/media/${id}.mpg`, JsHttpRequest: "1-xml" }, true)
+    ]);
+
+    res.json({ 
+      ok: true, 
+      test1, 
+      test2, 
+      test3, 
+      test4, 
+      test5 
+    });
+  } catch (err) { res.json({ ok: false, error: err.message }); }
+});
+
 app.listen(PORT, "0.0.0.0", () => console.log(`Server on ${PORT}`));
 module.exports = app;
