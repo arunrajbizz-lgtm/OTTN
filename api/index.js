@@ -160,6 +160,36 @@ function extractUrl(data) {
   return cmd.replace(/^(ffmpeg|ffrt|mpv|auto)\s+/i, "").trim();
 }
 
+const TMDB_KEY = "bab05eecb5b5691228f0a46852217cd2";
+
+async function getTMDBPoster(title, type = "movie") {
+  if (!title) return null;
+  try {
+    const cleanTitle = title.split("(")[0].replace(/[^\w\s]/gi, '').trim();
+    const searchUrl = `https://api.themoviedb.org/3/search/${type === "series" ? "tv" : "movie"}`;
+    const res = await axios.get(searchUrl, {
+      params: { api_key: TMDB_KEY, query: cleanTitle },
+      timeout: 3000
+    });
+    const result = res.data.results?.[0];
+    if (result?.poster_path) return `https://image.tmdb.org/t/p/w500${result.poster_path}`;
+    return null;
+  } catch (e) { return null; }
+}
+
+async function augmentWithTMDB(items, type = "movie") {
+  // Only augment first 30 items for performance
+  const sliced = items.slice(0, 30);
+  const rest = items.slice(30);
+  const augmented = await Promise.all(sliced.map(async (it) => {
+    const title = it.name || it.title || "";
+    const poster = await getTMDBPoster(title, type);
+    if (poster) it.tmdb_poster = poster;
+    return it;
+  }));
+  return [...augmented, ...rest];
+}
+
 // Routes
 app.get("/api/status", (req, res) => {
   res.json({ ok: true, provider: p().name, hasToken: !!token, currentIdx });
@@ -202,7 +232,8 @@ app.get("/api/live-channels", async (req, res) => {
       hd: "0",
       p: "1"
     }, true);
-    res.json({ ok: true, data: normalizeArray(raw) });
+    let data = normalizeArray(raw);
+    res.json({ ok: true, data });
   } catch (err) { res.json({ ok: false, error: err.message }); }
 });
 
@@ -243,7 +274,12 @@ app.get("/api/vod-list", async (req, res) => {
     if (movie_id) params.movie_id = movie_id;
     if (season_id) params.season_id = season_id;
     const raw = await stalkerRequest(params, true);
-    res.json({ ok: true, data: normalizeArray(raw) });
+    let data = normalizeArray(raw);
+    
+    // Augment with TMDB posters
+    data = await augmentWithTMDB(data, category === "series" ? "series" : "movie");
+    
+    res.json({ ok: true, data });
   } catch (err) { res.json({ ok: false, error: err.message }); }
 });
 

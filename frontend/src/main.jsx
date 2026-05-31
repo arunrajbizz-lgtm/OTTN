@@ -26,7 +26,7 @@ const titleOf = (x) => {
 };
 const idOf = (x) => x?.id || x?.category_id || x?.genre_id || x?.tv_genre_id || x?.alias || "*";
 const cmdOf = (x) => x?.cmd || x?.cmd_1 || x?.url || x?.stream_url || x?.file || x?.cmds?.[0]?.url || "";
-const thumbOf = (it) => it?.screenshot || it?.logo || it?.tv_genre_logo || it?.poster || "";
+const thumbOf = (it) => it?.tmdb_poster || it?.screenshot || it?.logo || it?.tv_genre_logo || it?.poster || "";
 
 const AVPlayer = {
   isAvailable: !!(window.webapis && window.webapis.avplay),
@@ -302,7 +302,6 @@ function App() {
   return (
     <div className={`app-shell ${isPlaying ? "video-playing" : ""}`}>
       <nav className={`sidebar ${navZone === "menu" ? "active-zone" : ""}`}>
-        <div className="active-zone-indicator"></div>
         <div className="brand"><span>POOMANI TV</span></div>
         <div className="nav-links">
           {MENU.map((m, i) => (
@@ -315,7 +314,6 @@ function App() {
 
       {categories.length > 0 && !seriesData && (
         <section className={`cat-panel ${navZone === "categories" ? "active-zone" : ""}`}>
-          <div className="active-zone-indicator"></div>
           <div className="panel-header"><h3>{section}</h3></div>
           <div className="scroll-list">
             {section !== "Shows archive" && (
@@ -330,7 +328,6 @@ function App() {
 
       {seriesData && (
         <section className={`cat-panel ${navZone === "seasons" ? "active-zone" : ""}`}>
-          <div className="active-zone-indicator"></div>
           <div className="panel-header"><h3>Seasons</h3></div>
           <div className="scroll-list">
             {seriesData.seasons.map((s, i) => (
@@ -341,7 +338,6 @@ function App() {
       )}
 
       <main className={`content-area ${(navZone === "items" || navZone === "episodes") ? "active-zone" : ""}`}>
-        <div className="active-zone-indicator"></div>
         <header className="main-header">
            <h1>{seriesData ? seriesData.originalItem.name : (selectedCat ? titleOf(selectedCat) : section)}</h1>
            <div className="status-badge">{status} | {navZone} [{focusIndex}]</div>
