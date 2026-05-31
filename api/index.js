@@ -37,7 +37,7 @@ let PROVIDERS = [
   }
 ];
 
-let currentIdx = 0; 
+let currentIdx = 1; 
 let token = "";
 let randomValue = "";
 
@@ -78,6 +78,7 @@ async function stalkerRequest(params, useAuth = false) {
 }
 
 async function doHandshake() {
+  console.log(`[Handshake] Starting for ${p().name}...`);
   const handshakeParams = { 
     type: "stb", 
     action: "handshake", 
@@ -88,21 +89,24 @@ async function doHandshake() {
   };
   let data = await stalkerRequest(handshakeParams);
   if (!data || data.js === false || !data.js?.token) {
+      console.warn("[Handshake] Strategy 1 failed or returned no token, trying Strategy 2...");
       data = await stalkerRequest({ type: "stb", action: "handshake", token: "" });
   }
   token = data?.js?.token || data?.token || data?.results?.token || "";
   randomValue = data?.js?.random || data?.random || data?.results?.random || "";
   
   if (!token) {
-    console.error("[Handshake] FAILED Response:", JSON.stringify(data));
+    console.error("[Handshake] FAILED. Response:", JSON.stringify(data));
     throw new Error(`Handshake failed: ${JSON.stringify(data).substring(0, 100)}`);
   }
+  console.log(`[Handshake] SUCCESS. Token: ${token.substring(0, 8)}...`);
   return data;
 }
 
 async function getProfile() {
+  console.log(`[Profile] Fetching for ${p().name}...`);
   if (!token) await doHandshake();
-  return await stalkerRequest({
+  const data = await stalkerRequest({
     type: "stb",
     action: "get_profile",
     hd: "1",
@@ -115,10 +119,13 @@ async function getProfile() {
     metrics: JSON.stringify({ mac: p().mac, sn: p().sn, model: "MAG250", uid: p().deviceId, random: randomValue }),
     JsHttpRequest: "1-xml",
   }, true);
+  console.log(`[Profile] Result for ${p().name}: ${data?.js ? "OK" : "FAILED"}`);
+  return data;
 }
 
 async function ensureAuth() {
   if (token) return; 
+  console.log(`[Auth] No token found, initiating full auth flow for ${p().name}`);
   return await getProfile();
 }
 
@@ -130,10 +137,38 @@ function normalizeArray(data) {
   return [];
 }
 
+app.use((req, res, next) => {
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
+  next();
+});
+
 // Routes
+app.get("/api/providers", (req, res) => {
+  res.json({ ok: true, providers: PROVIDERS, currentIdx });
+});
+
+app.post("/api/providers/select", (req, res) => {
+  const { index } = req.body;
+  if (index >= 0 && index < PROVIDERS.length) {
+    currentIdx = index;
+    token = ""; // Reset token on provider change
+    res.json({ ok: true, provider: PROVIDERS[currentIdx].name });
+  } else {
+    res.json({ ok: false, error: "Invalid index" });
+  }
+});
+
 app.get("/api/connect", async (req, res) => {
   try { await ensureAuth(); res.json({ ok: true, token, provider: p().name }); } 
   catch (err) { res.json({ ok: false, error: err.message }); }
+});
+
+app.get("/api/live-categories", async (req, res) => {
+  try {
+    await ensureAuth();
+    const raw = await stalkerRequest({ type: "itv", action: "get_genres", JsHttpRequest: "1-xml" }, true);
+    res.json({ ok: true, data: normalizeArray(raw) });
+  } catch (err) { res.json({ ok: false, error: err.message }); }
 });
 
 app.get("/api/media-library", async (req, res) => {
