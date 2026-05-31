@@ -74,7 +74,13 @@ async function stalkerRequest(params, useAuth = false) {
     let data = res.data;
     console.log(`[Portal] Response Status: ${res.status} for ${params.action}`);
     if (typeof data === "string") {
-      const trimmed = data.trim();
+      let trimmed = data.trim();
+      // Some portals prefix JSON with digits (e.g., "1{...}")
+      const match = trimmed.match(/^(\d+)(.*)/);
+      if (match && match[2]) {
+        console.log(`[Portal] Stripped leading ${match[1]} from response`);
+        trimmed = match[2].trim();
+      }
       try { 
         data = JSON.parse(trimmed); 
       } catch (e) { 
@@ -155,11 +161,23 @@ async function ensureAuth() {
 }
 
 function normalizeArray(data) {
+  if (!data) return [];
   if (Array.isArray(data)) return data;
-  if (Array.isArray(data?.js)) return data.js;
-  if (Array.isArray(data?.js?.data)) return data.js.data;
-  if (Array.isArray(data?.data)) return data.data;
-  if (typeof data?.js === 'object' && data.js !== null) return Object.values(data.js).filter(x => typeof x === 'object');
+  
+  // Unwrap nested structures
+  const obj = data.js || data.results || data.data || data;
+  if (Array.isArray(obj)) return obj;
+  if (Array.isArray(obj?.data)) return obj.data;
+  if (Array.isArray(obj?.js)) return obj.js;
+  
+  // Handle objects with numeric keys { "1": {}, "2": {} }
+  if (typeof obj === 'object' && obj !== null) {
+    const vals = Object.values(obj);
+    if (vals.length > 0 && typeof vals[0] === 'object') {
+      return vals.filter(x => x !== null && typeof x === 'object');
+    }
+  }
+  
   return [];
 }
 

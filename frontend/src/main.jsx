@@ -326,13 +326,14 @@ function App() {
         case 39: // Right
           if (navZone === "menu") { 
             if (["Settings", "Favorites", "Search"].includes(section)) switchZone("items");
-            else if (categories?.length > 0) switchZone("categories");
+            else switchZone("categories");
           }
-          else if (navZone === "categories" && items?.length > 0) switchZone("items");
+          else if (navZone === "categories") switchZone("items");
           else if (navZone === "items" && isPlaying) switchZone("player");
           else if (navZone === "seasons") switchZone("episodes");
           break;
         case 13: // Enter
+          console.log(`[Key] Enter pressed in ${navZone} zone at index ${focusIndex}`);
           if (navZone === "menu") loadSection(MENU[focusIndex].id);
           else if (navZone === "categories") {
             const hasAll = section !== "Shows archive";
