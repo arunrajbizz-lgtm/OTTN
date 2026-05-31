@@ -4,7 +4,6 @@ const cors = require("cors");
 
 const app = express();
 const PORT = process.env.PORT || 3001;
-const TMDB_API_KEY = process.env.TMDB_API_KEY;
 
 app.use(cors({ origin: "*" }));
 app.use(express.json());
@@ -29,8 +28,7 @@ let PROVIDERS = [
     deviceId: "E13DBFB1CC4977AE6A6202606271DF6B801D2A7779AE301A732B86C98AC4E642",
     deviceId2: "E13DBFB1CC4977AE6A6202606271DF6B801D2A7779AE301A732B86C98AC4E642",
     signature: ""
-  },
-  { id: "p3", name: "Provider 3", portal: "", mac: "", sn: "", deviceId: "", deviceId2: "", signature: "" }
+  }
 ];
 
 let currentIdx = 0;
@@ -56,7 +54,6 @@ function getHeaders(useAuth = false) {
 }
 
 async function stalkerRequest(params, useAuth = false) {
-  const action = params.action || params.type;
   try {
     const res = await axios.get(`${p().portal}/server/load.php`, {
       params,
@@ -67,13 +64,11 @@ async function stalkerRequest(params, useAuth = false) {
 
     let data = res.data;
     if (typeof data === "string") {
-      const trimmed = data.trim();
-      if (trimmed.startsWith("<")) throw new Error("Portal returned HTML");
-      try { data = JSON.parse(trimmed); } catch (e) { data = { raw_text: trimmed }; }
+      try { data = JSON.parse(data.trim()); } catch (e) { data = { raw_text: data }; }
     }
     return data;
   } catch (err) {
-    console.error(`[Portal] ${p().name} Error (${action}):`, err.message);
+    console.error(`[Portal] Error:`, err.message);
     throw err;
   }
 }
@@ -92,7 +87,6 @@ async function getProfile() {
     type: "stb",
     action: "get_profile",
     hd: "1",
-    ver: "ImageDescription: 0.2.18-r22-pub-270; PORTAL version: 5.6.1;",
     sn: p().sn,
     stb_type: "MAG250",
     device_id: p().deviceId,
@@ -118,98 +112,30 @@ function normalizeArray(data) {
   return [];
 }
 
-/**
- * OTT Navigator Style URL Extraction
- * Handles tokens, relative paths, and ffmpeg prefixes
- */
 function extractUrl(data, originalCmd = "") {
   const js = data?.js || {};
-  let cmd = js.cmd || js.url || js.stream_url || js.ffmpeg_cmd || data.cmd || data.url || data.results || "";
-  
+  let cmd = js.cmd || js.url || js.stream_url || js.ffmpeg_cmd || data.cmd || data.url || "";
   if (typeof data?.js === "string") cmd = data.js;
   
   let finalUrl = String(cmd).trim().replace(/^(ffmpeg|ffrt|mpv|auto)\s+/i, "").trim();
 
-  // Handle ?token=xxxx format
   if (finalUrl.startsWith("?token=")) {
-      console.log("[Playback] Token detected, attempting resolution...");
       let base = String(originalCmd).replace(/^(ffmpeg|ffrt|mpv|auto)\s+/i, "").trim();
-      
-      // Strategy 1: Append to original URL if it was a valid http link
       if (base.startsWith("http")) {
           const sep = base.includes("?") ? "&" : "?";
-          const cleanToken = finalUrl.startsWith("?") ? finalUrl.substring(1) : finalUrl;
-          return base + sep + cleanToken;
+          return base + sep + finalUrl.substring(1);
       }
-      
-      // Strategy 2: Look for stream_url in response as base
       if (js.stream_url && js.stream_url.includes("://")) {
           return js.stream_url.split('?')[0] + finalUrl;
       }
   }
-
   return finalUrl;
 }
 
-/**
- * Recursive Series Parser
- * Discovers seasons and episodes in nested JSON structures
- */
-function discoverEpisodes(obj, episodes = []) {
-  if (!obj || typeof obj !== "object") return episodes;
-  
-  // Detection logic for episode-like objects
-  if (obj.cmd && (obj.name || obj.title)) {
-    episodes.push({
-      id: obj.id || obj.movie_id || Math.random().toString(36).substr(2, 9),
-      title: obj.name || obj.title,
-      season: parseInt(obj.season_number || obj.season || obj.s_num || 1),
-      episode: parseInt(obj.episode_number || obj.episode || obj.number || obj.e_num || 0),
-      cmd: obj.cmd
-    });
-  }
-
-  for (let key in obj) {
-    if (obj[key] && typeof obj[key] === "object") {
-      discoverEpisodes(obj[key], episodes);
-    }
-  }
-  return episodes;
-}
-
 // Routes
-app.get("/", (req, res) => res.send(`POOMANI TV Active: ${p().name}`));
-app.get("/health", (req, res) => res.json({ status: "ok", active: p().name }));
-
 app.get("/api/connect", async (req, res) => {
-  try {
-    const profile = await ensureAuth();
-    res.json({ ok: true, token, profile, provider: p().name });
-  } catch (err) { res.json({ ok: false, error: err.message }); }
-});
-
-app.get("/api/providers", (req, res) => {
-  try {
-    const list = PROVIDERS.map((pr, i) => ({ ...pr, active: i === currentIdx }));
-    res.json({ ok: true, providers: list });
-  } catch (e) { res.json({ ok: false, error: e.message }); }
-});
-
-app.post("/api/update-provider", (req, res) => {
-  const { id, name, portal, mac, sn, deviceId, deviceId2, signature } = req.body;
-  const idx = PROVIDERS.findIndex(pr => pr.id === id);
-  if (idx === -1) return res.json({ ok: false, error: "Provider slot not found" });
-  PROVIDERS[idx] = { ...PROVIDERS[idx], name, portal, mac, sn, deviceId, deviceId2, signature };
-  res.json({ ok: true, message: "Saved" });
-});
-
-app.post("/api/select-provider", (req, res) => {
-  const { id } = req.body;
-  const idx = PROVIDERS.findIndex(pr => pr.id === id);
-  if (idx === -1) return res.json({ ok: false, error: "Provider not found" });
-  currentIdx = idx;
-  token = "";
-  res.json({ ok: true, active: p().name });
+  try { await ensureAuth(); res.json({ ok: true, token, provider: p().name }); } 
+  catch (err) { res.json({ ok: false, error: err.message }); }
 });
 
 app.get("/api/live-categories", async (req, res) => {
@@ -232,8 +158,12 @@ app.get("/api/live-channels", async (req, res) => {
 app.get("/api/vod-list", async (req, res) => {
   try {
     await ensureAuth();
-    const category = req.query.category || "*";
-    const data = await stalkerRequest({ type: "vod", action: "get_ordered_list", category, p: "1", num: "1000", JsHttpRequest: "1-xml" }, true);
+    const { category = "*", movie_id, season_id } = req.query;
+    const params = { type: "vod", action: "get_ordered_list", category, p: "1", num: "1000", JsHttpRequest: "1-xml" };
+    if (movie_id) params.movie_id = movie_id;
+    if (season_id) params.season_id = season_id;
+    
+    const data = await stalkerRequest(params, true);
     res.json({ ok: true, data: normalizeArray(data) });
   } catch (err) { res.json({ ok: false, error: err.message }); }
 });
@@ -242,67 +172,29 @@ app.get("/api/series-info", async (req, res) => {
   try {
     await ensureAuth();
     const movie_id = req.query.id;
-    const raw = await stalkerRequest({ type: "vod", action: "get_info", movie_id, JsHttpRequest: "1-xml" }, true);
-    console.log("SERIES INFO RAW", JSON.stringify(raw, null, 2));
-    
-    const js = raw?.js || raw;
-    const allEpisodes = discoverEpisodes(js);
-    const seasonsMap = {};
-    
-    allEpisodes.forEach(ep => {
-      if (!seasonsMap[ep.season]) seasonsMap[ep.season] = [];
-      seasonsMap[ep.season].push(ep);
-    });
-
-    const seasons = Object.keys(seasonsMap).sort((a,b) => a-b).map(sNum => ({
-      seasonNumber: parseInt(sNum),
-      episodes: seasonsMap[sNum].sort((a,b) => a.episode - b.episode)
-    }));
-
-    console.log("SEASONS DISCOVERED", JSON.stringify(seasons, null, 2));
-
-    res.json({
-      ok: true,
-      data: {
-        id: js.id || movie_id,
-        title: js.name || js.title,
-        plot: js.description || js.info || "",
-        poster: js.screenshot || js.poster || "",
-        seasons
-      }
-    });
+    const data = await stalkerRequest({ type: "vod", action: "get_info", movie_id, JsHttpRequest: "1-xml" }, true);
+    console.log("SERIES INFO RAW", JSON.stringify(data, null, 2));
+    res.json({ ok: true, data });
   } catch (err) { res.json({ ok: false, error: err.message }); }
 });
 
 app.get("/api/create-link", async (req, res) => {
   try {
     await ensureAuth();
-    const cmd = req.query.cmd || "";
-    const type = req.query.type || "itv";
-    const data = await stalkerRequest({ type, action: "create_link", cmd, JsHttpRequest: "1-xml" }, true);
+    const { cmd = "", type = "itv", series = "0", movie_id, season_id, episode_id } = req.query;
     
+    const params = { type, action: "create_link", cmd, series, JsHttpRequest: "1-xml" };
+    if (movie_id) params.movie_id = movie_id;
+    if (season_id) params.season_id = season_id;
+    if (episode_id) params.episode_id = episode_id;
+
+    console.log("CREATE_LINK_PARAMS", params);
+    const data = await stalkerRequest(params, true);
     console.log("CREATE_LINK_RESPONSE", JSON.stringify(data, null, 2));
 
     const playUrl = extractUrl(data, cmd);
-
-    // Validation
-    if (!playUrl || playUrl.startsWith("?")) {
-        console.error("TOKEN RESOLUTION FAILED. RESPONSE:", JSON.stringify(data));
-        return res.json({ ok: false, token: playUrl, raw: data, error: "Token resolution failed" });
-    }
-
-    res.json({ ok: true, url: playUrl, raw: data });
+    res.json({ ok: !!playUrl, url: playUrl, raw: data });
   } catch (err) { res.json({ ok: false, error: err.message }); }
-});
-
-app.get("/api/create-link-debug", async (req, res) => {
-  try {
-    await ensureAuth();
-    const cmd = req.query.cmd || "";
-    const type = req.query.type || "itv";
-    const data = await stalkerRequest({ type, action: "create_link", cmd, JsHttpRequest: "1-xml" }, true);
-    res.json(data);
-  } catch (err) { res.json({ error: err.message }); }
 });
 
 app.get("/api/search", async (req, res) => {
@@ -317,8 +209,5 @@ app.get("/api/search", async (req, res) => {
   } catch (err) { res.json({ ok: false, error: err.message }); }
 });
 
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(`Backend running on port ${PORT}`);
-});
-
+app.listen(PORT, "0.0.0.0", () => console.log(`Server on ${PORT}`));
 module.exports = app;
