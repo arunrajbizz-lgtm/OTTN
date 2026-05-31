@@ -150,6 +150,16 @@ function extractUrl(data) {
 
 // Routes
 app.get("/", (req, res) => res.send(`POOMANI TV Active: ${p().name}`));
+app.get("/health", (req, res) => res.json({ status: "ok", active: p().name }));
+
+app.get("/api/test-portal", async (req, res) => {
+  try {
+    const r = await axios.get(p().portal, { timeout: 10000 });
+    res.json({ ok: true, status: r.status, provider: p().name, url: p().portal });
+  } catch (e) {
+    res.json({ ok: false, error: e.message, provider: p().name, url: p().portal });
+  }
+});
 
 app.get("/api/providers", (req, res) => {
   try {
@@ -173,6 +183,13 @@ app.post("/api/select-provider", (req, res) => {
   currentIdx = idx;
   token = "";
   res.json({ ok: true, active: p().name });
+});
+
+app.get(["/api/connect", "/connect"], async (req, res) => {
+  try {
+    const profile = await ensureAuth();
+    res.json({ ok: true, token, profile, provider: p().name });
+  } catch (err) { res.json({ ok: false, error: err.message }); }
 });
 
 app.get("/api/live-categories", async (req, res) => {
