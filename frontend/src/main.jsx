@@ -404,6 +404,7 @@ function App() {
         setIsPlaying(false);
       }
 
+      // Remote Control Navigation
       switch (key) {
         case 38: // Up
           setFocusIndex(p => Math.max(0, p - 1));
@@ -412,15 +413,34 @@ function App() {
           setFocusIndex(p => Math.min(count - 1, p + 1));
           break;
         case 37: // Left
-          if (navZone !== "menu") {
-            setNavZone(navZone === "items" && section !== "Favorites" && section !== "Settings" ? "categories" : "menu");
+          if (navZone === "items") {
+            if (section === "Settings" || section === "Favorites" || section === "Search") {
+              setNavZone("menu");
+              restoreFocus("menu", section, null);
+            } else {
+              setNavZone("categories");
+              restoreFocus("categories", section, selectedCat);
+            }
+          } else if (navZone === "categories") {
+            setNavZone("menu");
+            restoreFocus("menu", section, null);
           }
           break;
         case 39: // Right
-          if (navZone === "menu" && (categories?.length > 0 || section === "Settings")) {
-            setNavZone(section === "Settings" ? "items" : "categories");
+          if (navZone === "menu") {
+            if (section === "Settings" || section === "Favorites" || section === "Search") {
+              setNavZone("items");
+              restoreFocus("items", section, null);
+            } else if (categories?.length > 0) {
+              setNavZone("categories");
+              restoreFocus("categories", section, null);
+            }
+          } else if (navZone === "categories") {
+            if (items?.length > 0) {
+              setNavZone("items");
+              restoreFocus("items", section, selectedCat);
+            }
           }
-          else if (navZone === "categories" && (items?.length > 0)) setNavZone("items");
           break;
         case 13: // Enter
           if (navZone === "menu") loadSection(MENU[focusIndex].id);
